@@ -67,15 +67,77 @@
         @media (hover: hover) {
             .camera-btn { display: none; }
         }
+
+        @media print {
+            .no-print {
+                display: none !important;
+            }
+
+            body {
+                background: white;
+                color: black;
+            }
+
+            #app {
+                max-width: 100%;
+                width: 100%;
+                margin: 0;
+                padding: 0;
+            }
+
+            .shopping-list {
+                background-color: transparent !important;
+                color: black !important;
+                padding: 0 !important;
+            }
+
+            .group-header {
+                color: black !important;
+                font-weight: bold;
+                font-size: 1.1em;
+                margin-top: 1.5em;
+                margin-bottom: 0.5em;
+                border-bottom: 1px solid #000;
+                page-break-after: avoid;
+            }
+
+            .item-row {
+                background-color: transparent !important;
+                border-bottom: 1px solid #eee;
+                padding-left: 0;
+                page-break-inside: avoid;
+            }
+
+            .item-row input[type="checkbox"] {
+                border: 1px solid black;
+                accent-color: black;
+                filter: grayscale(100%);
+            }
+
+            .item-row span {
+                color: black !important;
+            }
+
+            /* Explicitly cross out checked items in print mode, bypassing Tailwind if needed */
+            .item-row input[type="checkbox"]:checked + span,
+            .item-row .line-through {
+                text-decoration: line-through !important;
+                text-decoration-color: black !important;
+            }
+
+            .item-row .text-rose-100 {
+                color: black !important;
+            }
+        }
     </style>
 </head>
 <body class="flex justify-center min-h-screen pt-6 font-mono text-slate-700">
     <div id="app" class="max-w-screen-md mx-auto w-full p-4 bg-white flex flex-col lg:flex-row">
         <!-- Image column - smaller when viewing list -->
-        <div class="image-container w-full lg:w-1/5 p-4" v-if="isViewMode">
+        <div class="image-container w-full lg:w-1/5 p-4 no-print" v-if="isViewMode">
             <img src="/paris-figure.jpg" alt="Paris" class="w-12 lg:w-full">
         </div>
-        <div class="image-container w-full lg:w-1/3 p-4" v-else>
+        <div class="image-container w-full lg:w-1/3 p-4 no-print" v-else>
             <img src="/paris-figure.jpg" alt="Paris" class="w-12 lg:w-full">
         </div>
 
@@ -153,14 +215,14 @@
             <!-- View Mode (Shopping List) -->
             <div v-if="isViewMode">
                 <!-- Progress info -->
-                <div class="text-sm text-slate-500 mb-2" v-if="supermarketDisplay">
+                <div class="text-sm text-slate-500 mb-2 no-print" v-if="supermarketDisplay">
                     {{ supermarketDisplay }}
                 </div>
 
                 <!-- Shopping list items grouped by area -->
-                <div v-if="groups.length" class="my-3 text-lg font-mono text-white bg-rose-300 pt-2 px-2 pb-1 rounded leading-normal">
+                <div v-if="groups.length" class="shopping-list my-3 text-lg font-mono text-white bg-rose-300 pt-2 px-2 pb-1 rounded leading-normal">
                     <div v-for="group in groups" :key="group.area" class="mb-4">
-                        <div class="text-sm text-rose-100 uppercase tracking-wide mb-1">{{ group.area_display }}</div>
+                        <div class="group-header text-sm text-rose-100 uppercase tracking-wide mb-1">{{ group.area_display }}</div>
                         <div v-for="item in group.items"
                             :key="item.id"
                             class="item-row"
@@ -179,18 +241,22 @@
 
                 <!-- Progress display -->
                 <div id="context" v-if="totalCount > 0"
-                    class="text-lg pt-2 px-2 pb-1 rounded leading-normal bg-cyan-100 text-cyan-600">
+                    class="no-print text-lg pt-2 px-2 pb-1 rounded leading-normal bg-cyan-100 text-cyan-600">
                     {{ checkedCount }} of {{ totalCount }} items checked
                 </div>
 
                 <!-- All done message -->
                 <div v-if="checkedCount === totalCount && totalCount > 0"
-                    class="text-lg bg-green-200 font-mono pt-2 px-2 pb-1 rounded leading-normal mt-4">
+                    class="no-print text-lg bg-green-200 font-mono pt-2 px-2 pb-1 rounded leading-normal mt-4">
                     All done! Shopping complete.
                 </div>
 
                 <!-- Action buttons -->
-                <div class="flex space-x-2 mt-4">
+                <div class="flex space-x-2 mt-4 no-print">
+                    <button @click="printList"
+                        class="hover:opacity-75 cursor-pointer bg-slate-100 px-2 py-1 font-light rounded text-lg">
+                        Print
+                    </button>
                     <button @click="shareList"
                         class="hover:opacity-75 cursor-pointer bg-green-100 px-2 py-1 font-light rounded text-lg">
                         Share
@@ -204,7 +270,7 @@
         </div>
 
         <!-- Help button -->
-        <div class="fixed bottom-4 left-4">
+        <div class="fixed bottom-4 left-4 no-print">
             <button @click="showHelp = !showHelp"
                 class="w-8 h-8 rounded-full bg-slate-200 hover:bg-slate-300 flex items-center justify-center text-slate-600">
                 ?
@@ -213,7 +279,7 @@
 
         <!-- Help overlay -->
         <div v-if="showHelp"
-            class="fixed bottom-16 left-4 p-4 bg-white shadow-lg rounded-lg border border-slate-200 max-w-sm">
+            class="fixed bottom-16 left-4 p-4 bg-white shadow-lg rounded-lg border border-slate-200 max-w-sm no-print">
             <h3 class="font-bold mb-2">How to Use</h3>
             <div class="text-sm space-y-2">
                 <p>Type or paste your shopping list, or upload an image of a list.</p>
@@ -226,7 +292,7 @@
 
         <!-- Share Modal -->
         <div v-if="showShareModal"
-            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 no-print">
             <div class="bg-white rounded-lg p-6 max-w-sm w-full">
                 <h3 class="font-bold mb-4">Share your list</h3>
                 <input type="text"
@@ -444,6 +510,10 @@
                 clearImage() {
                     this.imagePreview = null;
                     this.imageData = null;
+                },
+
+                printList() {
+                    window.print();
                 },
 
                 shareList() {
