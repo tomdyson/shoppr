@@ -48,6 +48,7 @@ MODEL_PRICING = {
     "gemini-2.0-flash-lite": {"input": 0.075, "output": 0.30},
     "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
     "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
+    "gemini-3-flash-preview": {"input": 0.50, "output": 3.00},
     # Fallback default
     "default": {"input": 0.10, "output": 0.40}
 }
