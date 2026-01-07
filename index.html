@@ -266,6 +266,25 @@
                         New list
                     </a>
                 </div>
+
+                <!-- LLM Token Usage Footer -->
+                <div v-if="meta" class="mt-8 text-xs text-slate-400 border-t border-slate-200 pt-4 no-print">
+                    <div v-if="meta.ocr" class="mb-2">
+                        <div class="font-semibold text-slate-500">Image Recognition</div>
+                        <div>Model: {{ meta.ocr.model }}</div>
+                        <div>Tokens: {{ meta.ocr.input_tokens }} in, {{ meta.ocr.output_tokens }} out</div>
+                        <div>Cost: ${{ formatCost(meta.ocr.cost) }}</div>
+                    </div>
+                    <div v-if="meta.planning">
+                        <div class="font-semibold text-slate-500">Shopping List Planning</div>
+                        <div>Model: {{ meta.planning.model }}</div>
+                        <div>Tokens: {{ meta.planning.input_tokens }} in, {{ meta.planning.output_tokens }} out</div>
+                        <div>Cost: ${{ formatCost(meta.planning.cost) }}</div>
+                    </div>
+                    <div v-if="totalCost > 0" class="mt-2 font-semibold text-slate-500 border-t border-slate-100 pt-1">
+                        Total Estimated Cost: ${{ formatCost(totalCost) }}
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -336,6 +355,7 @@
                 supermarket: null,
                 supermarketDisplay: null,
                 groups: [],
+                meta: null,
 
                 // Supermarket options
                 supermarkets: {
@@ -363,9 +383,21 @@
                 },
                 shareUrl() {
                     return window.location.href;
+                },
+                totalCost() {
+                    let cost = 0;
+                    if (this.meta) {
+                        if (this.meta.ocr) cost += this.meta.ocr.cost;
+                        if (this.meta.planning) cost += this.meta.planning.cost;
+                    }
+                    return cost;
                 }
             },
             methods: {
+                formatCost(val) {
+                    if (val === undefined || val === null) return '0.00000';
+                    return val.toFixed(5);
+                },
                 async processInput() {
                     this.errorMessage = '';
                     this.isLoading = true;
@@ -417,6 +449,7 @@
                     this.supermarket = data.supermarket;
                     this.supermarketDisplay = data.supermarket_display;
                     this.groups = data.groups;
+                    this.meta = data.meta || null;
                     this.isViewMode = true;
 
                     // Select first unchecked item
@@ -533,6 +566,7 @@
                     this.isViewMode = false;
                     this.listId = null;
                     this.groups = [];
+                    this.meta = null;
                     this.inputText = '';
                     this.imagePreview = null;
                     this.imageData = null;
