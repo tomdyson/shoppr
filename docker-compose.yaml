@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - shopping_data:/app/data
+      - ./.env:/app/.env:ro
+    env_file:
+      - .env
+    restart: unless-stopped
+
+volumes:
+  shopping_data:
