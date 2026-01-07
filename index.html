@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#10b981">
+    <meta name="theme-color" content="#06b1de">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <title>Shoppr</title>
@@ -11,45 +11,48 @@
     <link href="/dist/output.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/vue@2/dist/vue.min.js"></script>
     <style>
-        /* Touch-friendly checkboxes */
-        .item-checkbox {
-            width: 24px;
-            height: 24px;
-            min-width: 24px;
-            cursor: pointer;
-        }
-
-        /* Item row tap target */
+        /* Item styling similar to Todonanny task-item */
         .item-row {
-            min-height: 48px;
-            transition: background-color 0.15s ease;
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 0.5rem;
+            padding: 0.25rem;
+            border-radius: 0.25rem;
         }
 
-        .item-row:active {
-            background-color: rgba(16, 185, 129, 0.1);
+        .item-row input[type="checkbox"] {
+            cursor: pointer;
+            margin-top: 0.2rem;
         }
 
-        /* Sticky area headers */
-        .area-header {
-            position: sticky;
-            top: 0;
-            z-index: 10;
+        .item-row span {
+            transition: all 0.3s ease;
         }
 
-        /* Image drop zone */
-        .drop-zone {
-            transition: all 0.2s ease;
+        /* Image container transitions like Todonanny */
+        .image-container {
+            transition: width 0.5s ease-in-out;
         }
 
-        .drop-zone.dragover {
-            border-color: #10b981;
-            background-color: rgba(16, 185, 129, 0.1);
+        .image-container img {
+            transition: all 0.5s ease-in-out;
+            height: auto;
+        }
+
+        /* Rose highlight for selected items */
+        .item-row.bg-rose-400 {
+            background-color: rgb(251 113 133);
+        }
+
+        kbd {
+            font-family: ui-monospace, monospace;
+            border: 1px solid #e2e8f0;
         }
 
         /* Loading spinner */
         .spinner {
-            border: 3px solid rgba(16, 185, 129, 0.2);
-            border-top-color: #10b981;
+            border: 3px solid rgba(6, 177, 222, 0.2);
+            border-top-color: #06b1de;
             border-radius: 50%;
             width: 24px;
             height: 24px;
@@ -66,171 +69,175 @@
         }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <div id="app" class="max-w-lg mx-auto px-4 py-6">
-        <!-- Header -->
-        <header class="mb-6">
-            <h1 class="text-2xl font-bold text-gray-800">Shoppr</h1>
-            <p class="text-sm text-gray-500" v-if="!isViewMode">Create an organized shopping list</p>
-        </header>
+<body class="flex justify-center min-h-screen pt-6 font-mono text-slate-700">
+    <div id="app" class="max-w-screen-md mx-auto w-full p-4 bg-white flex flex-col lg:flex-row">
+        <!-- Image column - smaller when viewing list -->
+        <div class="image-container w-full lg:w-1/5 p-4" v-if="isViewMode">
+            <img src="/paris-figure.jpg" alt="Paris" class="w-12 lg:w-full">
+        </div>
+        <div class="image-container w-full lg:w-1/3 p-4" v-else>
+            <img src="/paris-figure.jpg" alt="Paris" class="w-12 lg:w-full">
+        </div>
 
-        <!-- Input Mode -->
-        <div v-if="!isViewMode">
-            <!-- Supermarket selector -->
-            <div class="mb-4">
-                <label for="supermarket" class="block text-sm font-medium text-gray-700 mb-1">
-                    Supermarket (optional)
-                </label>
-                <select id="supermarket" v-model="selectedSupermarket"
-                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
-                    <option value="">Any supermarket</option>
-                    <option v-for="(name, key) in supermarkets" :key="key" :value="key">{{ name }}</option>
-                </select>
-            </div>
+        <!-- Main content column -->
+        <div class="w-full lg:w-3/4 p-4 space-y-4">
+            <!-- Input Mode -->
+            <form @submit.prevent="processInput" v-if="!isViewMode">
+                <div class="flex justify-between items-center mb-3 mt-3">
+                </div>
 
-            <!-- Text input -->
-            <div class="mb-4">
-                <label for="listInput" class="block text-sm font-medium text-gray-700 mb-1">
-                    Shopping list
-                </label>
-                <textarea id="listInput" v-model="inputText" rows="6"
-                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none"
-                    placeholder="Paste or type your shopping list here...&#10;&#10;e.g.&#10;Milk 2L&#10;Bread&#10;6 eggs&#10;Chicken breast 500g"></textarea>
-            </div>
+                <!-- Supermarket selector -->
+                <div class="mb-4">
+                    <select id="supermarket" v-model="selectedSupermarket"
+                        class="text-lg font-light font-mono border border-gray-300 px-2 py-1 mb-1 w-full rounded">
+                        <option value="">Any supermarket</option>
+                        <option v-for="(name, key) in supermarkets" :key="key" :value="key">{{ name }}</option>
+                    </select>
+                </div>
 
-            <!-- Image upload area -->
-            <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-700 mb-1">
-                    Or upload an image
-                </label>
-                <div class="drop-zone border-2 border-dashed border-gray-300 rounded-lg p-6 text-center"
-                    :class="{ 'dragover': isDragging }"
-                    @dragover.prevent="isDragging = true"
-                    @dragleave.prevent="isDragging = false"
-                    @drop.prevent="handleDrop">
+                <!-- Text input -->
+                <textarea id="listInput" v-model="inputText" rows="4"
+                    class="text-lg font-light border border-gray-300 px-2 py-1 mb-1 w-full rounded resize-none overflow-hidden min-h-[100px] leading-[1.5]"
+                    placeholder="Paste or type your shopping list here..."></textarea>
 
-                    <!-- Image preview -->
-                    <div v-if="imagePreview" class="mb-4">
-                        <img :src="imagePreview" class="max-h-48 mx-auto rounded-lg shadow">
-                        <button @click="clearImage" class="mt-2 text-sm text-red-600 hover:text-red-800">
-                            Remove image
-                        </button>
-                    </div>
+                <!-- Image upload area -->
+                <div class="my-4">
+                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center"
+                        :class="{ 'border-cyan-400 bg-cyan-50': isDragging }"
+                        @dragover.prevent="isDragging = true"
+                        @dragleave.prevent="isDragging = false"
+                        @drop.prevent="handleDrop">
 
-                    <!-- Upload buttons -->
-                    <div v-else>
-                        <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
-                            <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                        <p class="mt-2 text-sm text-gray-600">
-                            Drag & drop an image, or
-                        </p>
-                        <div class="mt-2 flex justify-center gap-2 flex-wrap">
-                            <label class="cursor-pointer px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
-                                Choose file
-                                <input type="file" accept="image/*" @change="handleFileSelect" class="hidden">
-                            </label>
-                            <label class="camera-btn cursor-pointer px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
-                                Take photo
-                                <input type="file" accept="image/*" capture="environment" @change="handleFileSelect" class="hidden">
-                            </label>
-                            <button @click="pasteFromClipboard"
-                                class="px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
-                                Paste
+                        <!-- Image preview -->
+                        <div v-if="imagePreview" class="mb-2">
+                            <img :src="imagePreview" class="max-h-32 mx-auto rounded shadow">
+                            <button type="button" @click="clearImage" class="mt-2 text-sm text-rose-500 hover:text-rose-700">
+                                Remove image
                             </button>
+                        </div>
+
+                        <!-- Upload buttons -->
+                        <div v-else class="text-sm text-slate-500">
+                            <p class="mb-2">Or upload an image</p>
+                            <div class="flex justify-center gap-2 flex-wrap">
+                                <label class="cursor-pointer px-3 py-1 bg-slate-100 rounded hover:bg-slate-200">
+                                    Choose file
+                                    <input type="file" accept="image/*" @change="handleFileSelect" class="hidden">
+                                </label>
+                                <label class="camera-btn cursor-pointer px-3 py-1 bg-slate-100 rounded hover:bg-slate-200">
+                                    Take photo
+                                    <input type="file" accept="image/*" capture="environment" @change="handleFileSelect" class="hidden">
+                                </label>
+                                <button type="button" @click="pasteFromClipboard"
+                                    class="px-3 py-1 bg-slate-100 rounded hover:bg-slate-200">
+                                    Paste
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Submit button -->
-            <button @click="processInput" :disabled="isLoading || (!inputText.trim() && !imageData)"
-                class="w-full py-3 px-4 bg-emerald-500 text-white font-medium rounded-lg hover:bg-emerald-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors">
-                <span v-if="isLoading" class="flex items-center justify-center gap-2">
-                    <span class="spinner"></span>
-                    {{ loadingMessage }}
-                </span>
-                <span v-else>Create shopping list</span>
-            </button>
+                <!-- Submit button -->
+                <input id="submit"
+                    class="hover:opacity-75 mt-3 cursor-pointer bg-cyan-100 px-2 py-1 font-light rounded text-lg mb-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                    type="submit"
+                    :value="isLoading ? loadingMessage : 'Create shopping list'"
+                    :disabled="isLoading || (!inputText.trim() && !imageData)" />
 
-            <!-- Error message -->
-            <div v-if="errorMessage" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-                {{ errorMessage }}
+                <!-- Error message -->
+                <div v-if="errorMessage" class="mt-4 p-2 bg-rose-100 text-rose-600 rounded text-sm">
+                    {{ errorMessage }}
+                </div>
+            </form>
+
+            <!-- View Mode (Shopping List) -->
+            <div v-if="isViewMode">
+                <!-- Progress info -->
+                <div class="text-sm text-slate-500 mb-2" v-if="supermarketDisplay">
+                    {{ supermarketDisplay }}
+                </div>
+
+                <!-- Shopping list items grouped by area -->
+                <div v-if="groups.length" class="my-3 text-lg font-mono text-white bg-rose-300 pt-2 px-2 pb-1 rounded leading-normal">
+                    <div v-for="group in groups" :key="group.area" class="mb-4">
+                        <div class="text-sm text-rose-100 uppercase tracking-wide mb-1">{{ group.area_display }}</div>
+                        <div v-for="item in group.items"
+                            :key="item.id"
+                            class="item-row"
+                            :class="{'bg-rose-400': item.id === selectedItemId }">
+                            <input type="checkbox"
+                                :id="'item-' + item.id"
+                                :checked="item.checked"
+                                @change="toggleItem(item)"
+                                class="mr-2 h-4 w-4 rounded border-gray-300 text-rose-400 focus:ring-rose-300 cursor-pointer">
+                            <span :class="{'line-through': item.checked }" class="leading-tight">
+                                <div>{{ item.name }}<span v-if="item.quantity" class="text-rose-100 text-sm ml-1">({{ item.quantity }})</span></div>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Progress display -->
+                <div id="context" v-if="totalCount > 0"
+                    class="text-lg pt-2 px-2 pb-1 rounded leading-normal bg-cyan-100 text-cyan-600">
+                    {{ checkedCount }} of {{ totalCount }} items checked
+                </div>
+
+                <!-- All done message -->
+                <div v-if="checkedCount === totalCount && totalCount > 0"
+                    class="text-lg bg-green-200 font-mono pt-2 px-2 pb-1 rounded leading-normal mt-4">
+                    All done! Shopping complete.
+                </div>
+
+                <!-- Action buttons -->
+                <div class="flex space-x-2 mt-4">
+                    <button @click="shareList"
+                        class="hover:opacity-75 cursor-pointer bg-green-100 px-2 py-1 font-light rounded text-lg">
+                        Share
+                    </button>
+                    <a href="/" @click.prevent="newList"
+                        class="hover:opacity-75 cursor-pointer bg-cyan-100 px-2 py-1 font-light rounded text-lg">
+                        New list
+                    </a>
+                </div>
             </div>
         </div>
 
-        <!-- View Mode (Shopping List) -->
-        <div v-else>
-            <!-- List header -->
-            <div class="flex items-center justify-between mb-4">
-                <div>
-                    <span v-if="supermarketDisplay" class="text-sm text-emerald-600 font-medium">
-                        {{ supermarketDisplay }}
-                    </span>
-                    <div class="text-sm text-gray-500">
-                        {{ checkedCount }} of {{ totalCount }} items
-                    </div>
-                </div>
-                <div class="flex gap-2">
-                    <button @click="shareList"
-                        class="px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
-                        Share
-                    </button>
-                    <button @click="newList"
-                        class="px-3 py-1.5 text-sm bg-emerald-500 text-white rounded-lg hover:bg-emerald-600">
-                        New list
-                    </button>
-                </div>
-            </div>
+        <!-- Help button -->
+        <div class="fixed bottom-4 left-4">
+            <button @click="showHelp = !showHelp"
+                class="w-8 h-8 rounded-full bg-slate-200 hover:bg-slate-300 flex items-center justify-center text-slate-600">
+                ?
+            </button>
+        </div>
 
-            <!-- Progress bar -->
-            <div class="h-2 bg-gray-200 rounded-full mb-6 overflow-hidden">
-                <div class="h-full bg-emerald-500 transition-all duration-300"
-                    :style="{ width: progressPercent + '%' }"></div>
-            </div>
-
-            <!-- Grouped items -->
-            <div v-for="group in groups" :key="group.area" class="mb-6">
-                <h2 class="area-header bg-gray-50 py-2 text-sm font-semibold text-gray-600 uppercase tracking-wide border-b border-gray-200">
-                    {{ group.area_display }}
-                </h2>
-                <ul>
-                    <li v-for="item in group.items" :key="item.id"
-                        class="item-row flex items-center gap-3 py-3 border-b border-gray-100"
-                        @click="toggleItem(item)">
-                        <input type="checkbox" :checked="item.checked"
-                            @click.stop
-                            @change="toggleItem(item)"
-                            class="item-checkbox rounded border-gray-300 text-emerald-500 focus:ring-emerald-500">
-                        <span class="flex-1" :class="{ 'line-through text-gray-400': item.checked }">
-                            {{ item.name }}
-                            <span v-if="item.quantity" class="text-gray-500 text-sm ml-1">({{ item.quantity }})</span>
-                        </span>
-                    </li>
-                </ul>
-            </div>
-
-            <!-- All done message -->
-            <div v-if="checkedCount === totalCount && totalCount > 0"
-                class="text-center py-8 text-emerald-600">
-                <svg class="mx-auto h-12 w-12 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                </svg>
-                <p class="font-medium">All done!</p>
+        <!-- Help overlay -->
+        <div v-if="showHelp"
+            class="fixed bottom-16 left-4 p-4 bg-white shadow-lg rounded-lg border border-slate-200 max-w-sm">
+            <h3 class="font-bold mb-2">How to Use</h3>
+            <div class="text-sm space-y-2">
+                <p>Type or paste your shopping list, or upload an image of a list.</p>
+                <p class="bg-slate-50 p-2 rounded italic">
+                    e.g. Milk 2L, Bread, 6 eggs, Chicken breast 500g
+                </p>
+                <p>The app will organize items by supermarket section.</p>
             </div>
         </div>
 
         <!-- Share Modal -->
-        <div v-if="showShareModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div v-if="showShareModal"
+            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
             <div class="bg-white rounded-lg p-6 max-w-sm w-full">
                 <h3 class="font-bold mb-4">Share your list</h3>
-                <input type="text" ref="shareUrl" :value="shareUrl" readonly
-                    class="w-full p-2 border rounded-lg bg-gray-50 text-sm"
+                <input type="text"
+                    ref="shareUrl"
+                    :value="shareUrl"
+                    class="w-full p-2 border rounded mb-4 bg-slate-50"
+                    readonly
                     @click="$refs.shareUrl.select()">
-                <p class="text-sm text-gray-500 mt-2">Link copied to clipboard!</p>
-                <div class="flex justify-end mt-4">
+                <div class="flex justify-end space-x-2">
                     <button @click="showShareModal = false"
-                        class="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200">
+                        class="px-4 py-2 rounded hover:opacity-75 bg-slate-100">
                         Close
                     </button>
                 </div>
@@ -254,7 +261,9 @@
                 loadingMessage: '',
                 isViewMode: false,
                 showShareModal: false,
+                showHelp: false,
                 errorMessage: '',
+                selectedItemId: null,
 
                 // List data
                 listId: null,
@@ -343,6 +352,15 @@
                     this.supermarketDisplay = data.supermarket_display;
                     this.groups = data.groups;
                     this.isViewMode = true;
+
+                    // Select first unchecked item
+                    for (const group of this.groups) {
+                        const unchecked = group.items.find(i => !i.checked);
+                        if (unchecked) {
+                            this.selectedItemId = unchecked.id;
+                            break;
+                        }
+                    }
 
                     // Update URL
                     window.history.pushState({}, '', `/list/${data.list_id}`);
@@ -450,7 +468,28 @@
                     this.imageData = null;
                     this.selectedSupermarket = '';
                     this.errorMessage = '';
+                    this.selectedItemId = null;
                     window.history.pushState({}, '', '/');
+                },
+
+                handleKeyboard(e) {
+                    // Handle '?' key
+                    if (e.key === '?') {
+                        e.preventDefault();
+                        this.showHelp = !this.showHelp;
+                        return;
+                    }
+
+                    // Handle escape key for modals
+                    if (e.key === 'Escape') {
+                        if (this.showShareModal) {
+                            this.showShareModal = false;
+                        }
+                        if (this.showHelp) {
+                            this.showHelp = false;
+                        }
+                        return;
+                    }
                 }
             },
             mounted() {
@@ -477,6 +516,12 @@
                         }
                     }
                 });
+
+                // Add keyboard event listener
+                window.addEventListener('keydown', this.handleKeyboard);
+            },
+            destroyed() {
+                window.removeEventListener('keydown', this.handleKeyboard);
             }
         });
 
