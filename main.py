@@ -4,7 +4,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Tuple
 from uuid import UUID
 
 import llm
@@ -39,6 +39,18 @@ app.add_middleware(
 MODEL_NAME = os.getenv("LLM_MODEL", "gemini-2.5-flash-lite")
 VISION_MODEL_NAME = os.getenv("LLM_VISION_MODEL", "gemini-2.5-flash")
 API_KEY = os.getenv("LLM_API_KEY")
+
+# Pricing per 1M tokens (USD)
+# Users can update this dictionary to reflect current pricing or add new models
+MODEL_PRICING = {
+    "gemini-2.5-flash-lite": {"input": 0.075, "output": 0.30},
+    "gemini-2.5-flash": {"input": 0.075, "output": 0.30},
+    "gemini-2.0-flash-lite": {"input": 0.075, "output": 0.30},
+    "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
+    "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
+    # Fallback default
+    "default": {"input": 0.10, "output": 0.40}
+}
 
 # Supermarket options
 SUPERMARKETS = {
@@ -105,6 +117,7 @@ class ShoppingListResponse(BaseModel):
     supermarket: Optional[str]
     supermarket_display: Optional[str]
     groups: List[ItemGroup]
+    meta: Optional[Dict[str, Any]] = None
 
 
 class UpdateItemRequest(BaseModel):
@@ -130,7 +143,15 @@ def load_prompt(supermarket: Optional[str]) -> str:
         return f.read()
 
 
-def process_items_with_llm(items_text: str, supermarket: Optional[str]) -> List[dict]:
+def calculate_cost(model_name: str, input_tokens: int, output_tokens: int) -> float:
+    """Calculate cost in USD for the given usage."""
+    pricing = MODEL_PRICING.get(model_name, MODEL_PRICING.get("default"))
+    input_cost = (input_tokens / 1_000_000) * pricing["input"]
+    output_cost = (output_tokens / 1_000_000) * pricing["output"]
+    return input_cost + output_cost
+
+
+def process_items_with_llm(items_text: str, supermarket: Optional[str]) -> Tuple[List[dict], Dict[str, Any]]:
     """Process shopping list text into categorized items using LLM."""
     model = llm.get_model(MODEL_NAME)
     if API_KEY:
@@ -160,18 +181,28 @@ IMPORTANT: Respond ONLY with the JSON array, no additional text."""
 
     # Log token usage
     print(f"Model used: {MODEL_NAME}")
+    usage_stats = {
+        "model": MODEL_NAME,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost": 0.0
+    }
+
     usage = response.usage()
     if usage:
         print(f"Token count - Input: {usage.input}, Output: {usage.output}")
+        usage_stats["input_tokens"] = usage.input
+        usage_stats["output_tokens"] = usage.output
+        usage_stats["cost"] = calculate_cost(MODEL_NAME, usage.input, usage.output)
 
     raw_response = response.text()
     print("Raw LLM response:", raw_response)
 
     cleaned_response = strip_markdown_code_blocks(raw_response)
-    return json.loads(cleaned_response)
+    return json.loads(cleaned_response), usage_stats
 
 
-def ocr_image_with_llm(image_base64: str) -> str:
+def ocr_image_with_llm(image_base64: str) -> Tuple[str, Dict[str, Any]]:
     """Extract text from image using vision-capable LLM."""
     model = llm.get_model(VISION_MODEL_NAME)
     if API_KEY:
@@ -194,11 +225,21 @@ def ocr_image_with_llm(image_base64: str) -> str:
 
     # Log token usage
     print(f"Vision model used: {VISION_MODEL_NAME}")
+    usage_stats = {
+        "model": VISION_MODEL_NAME,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost": 0.0
+    }
+
     usage = response.usage()
     if usage:
         print(f"Token count - Input: {usage.input}, Output: {usage.output}")
+        usage_stats["input_tokens"] = usage.input
+        usage_stats["output_tokens"] = usage.output
+        usage_stats["cost"] = calculate_cost(VISION_MODEL_NAME, usage.input, usage.output)
 
-    return response.text()
+    return response.text(), usage_stats
 
 
 # Initialize the database when the app starts
@@ -253,7 +294,7 @@ async def process_text(request: ProcessTextRequest):
             raise HTTPException(status_code=400, detail="Invalid supermarket")
 
         # Process with LLM
-        items = process_items_with_llm(request.text, request.supermarket)
+        items, planning_usage = process_items_with_llm(request.text, request.supermarket)
 
         # Validate items
         if not isinstance(items, list) or len(items) == 0:
@@ -269,7 +310,11 @@ async def process_text(request: ProcessTextRequest):
         # Get the formatted response
         list_data = database.get_shopping_list(list_id)
 
-        return format_list_response(list_data)
+        response = format_list_response(list_data)
+        response.meta = {
+            "planning": planning_usage
+        }
+        return response
 
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"Failed to parse LLM response: {str(e)}")
@@ -288,14 +333,14 @@ async def process_image(request: ProcessImageRequest):
 
         # OCR the image
         print("Starting OCR...")
-        extracted_text = ocr_image_with_llm(request.image)
+        extracted_text, ocr_usage = ocr_image_with_llm(request.image)
         print(f"OCR result: {extracted_text}")
 
         if not extracted_text.strip():
             raise HTTPException(status_code=400, detail="Could not extract any text from image")
 
         # Process the extracted text
-        items = process_items_with_llm(extracted_text, request.supermarket)
+        items, planning_usage = process_items_with_llm(extracted_text, request.supermarket)
 
         # Validate items
         if not isinstance(items, list) or len(items) == 0:
@@ -311,7 +356,12 @@ async def process_image(request: ProcessImageRequest):
         # Get the formatted response
         list_data = database.get_shopping_list(list_id)
 
-        return format_list_response(list_data)
+        response = format_list_response(list_data)
+        response.meta = {
+            "ocr": ocr_usage,
+            "planning": planning_usage
+        }
+        return response
 
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"Failed to parse LLM response: {str(e)}")
@@ -368,7 +418,8 @@ def format_list_response(list_data: dict) -> ShoppingListResponse:
         list_id=list_data['list_id'],
         supermarket=list_data['supermarket'],
         supermarket_display=supermarket_display,
-        groups=groups
+        groups=groups,
+        meta=None  # Explicitly set meta to None by default
     )
 
 
