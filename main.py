@@ -260,15 +260,6 @@ async def read_root():
     return FileResponse(BASE_DIR / "index.html")
 
 
-# Serve index.html for list view routes (must be after static mounts)
-@app.get("/{list_id}")
-async def list_page(list_id: str):
-    # Only serve for valid 5-char slugs to avoid catching other routes
-    if not is_valid_slug(list_id):
-        raise HTTPException(status_code=404, detail="Not found")
-    return FileResponse(BASE_DIR / "index.html")
-
-
 # Mount static directories
 app.mount("/dist", StaticFiles(directory=BASE_DIR / "dist"), name="dist")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
@@ -424,6 +415,15 @@ def format_list_response(list_data: dict) -> ShoppingListResponse:
         groups=groups,
         meta=None  # Explicitly set meta to None by default
     )
+
+
+# Catch-all route for short list URLs (must be last to avoid catching other routes)
+@app.get("/{list_id}")
+async def list_page(list_id: str):
+    """Serve index.html for valid 5-char list slugs."""
+    if not is_valid_slug(list_id):
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(BASE_DIR / "index.html")
 
 
 if __name__ == "__main__":

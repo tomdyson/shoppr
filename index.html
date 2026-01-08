@@ -272,22 +272,27 @@
                     </a>
                 </div>
 
-                <!-- LLM Token Usage Footer -->
-                <div v-if="meta" class="mt-8 text-xs text-slate-400 border-t border-slate-200 pt-4 no-print">
-                    <div v-if="meta.ocr" class="mb-2">
-                        <div class="font-semibold text-slate-500">Image Recognition</div>
-                        <div>Model: {{ meta.ocr.model }}</div>
-                        <div>Tokens: {{ meta.ocr.input_tokens }} in, {{ meta.ocr.output_tokens }} out</div>
-                        <div>Cost: ${{ formatCost(meta.ocr.cost) }}</div>
-                    </div>
-                    <div v-if="meta.planning">
-                        <div class="font-semibold text-slate-500">Shopping List Planning</div>
-                        <div>Model: {{ meta.planning.model }}</div>
-                        <div>Tokens: {{ meta.planning.input_tokens }} in, {{ meta.planning.output_tokens }} out</div>
-                        <div>Cost: ${{ formatCost(meta.planning.cost) }}</div>
-                    </div>
-                    <div v-if="totalCost > 0" class="mt-2 font-semibold text-slate-500 border-t border-slate-100 pt-1">
-                        Total Estimated Cost: ${{ formatCost(totalCost) }}
+                <!-- LLM Token Usage Footer (Debug) -->
+                <div v-if="meta" class="mt-6 no-print" style="font-size: 11px; color: #94a3b8;">
+                    <button @click="showDebug = !showDebug" class="hover:underline">
+                        {{ showDebug ? 'Hide' : 'Show' }} debug info
+                    </button>
+                    <div v-if="showDebug" class="mt-2">
+                        <div v-if="meta.ocr" class="mb-2">
+                            <div class="font-semibold" style="color: #64748b;">Image Recognition</div>
+                            <div>Model: {{ meta.ocr.model }}</div>
+                            <div>Tokens: {{ meta.ocr.input_tokens }} in, {{ meta.ocr.output_tokens }} out</div>
+                            <div>Cost: ${{ formatCost(meta.ocr.cost) }}</div>
+                        </div>
+                        <div v-if="meta.planning">
+                            <div class="font-semibold" style="color: #64748b;">Shopping List Planning</div>
+                            <div>Model: {{ meta.planning.model }}</div>
+                            <div>Tokens: {{ meta.planning.input_tokens }} in, {{ meta.planning.output_tokens }} out</div>
+                            <div>Cost: ${{ formatCost(meta.planning.cost) }}</div>
+                        </div>
+                        <div v-if="totalCost > 0" class="mt-2 font-semibold border-t border-slate-100 pt-1" style="color: #64748b;">
+                            Total Estimated Cost: ${{ formatCost(totalCost) }}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -347,6 +352,7 @@
                 isViewMode: false,
                 showShareModal: false,
                 showHelp: false,
+                showDebug: false,
                 errorMessage: '',
                 selectedItemId: null,
 
