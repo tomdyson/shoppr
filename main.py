@@ -5,8 +5,6 @@ import re
 import time
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
-from uuid import UUID
-
 import llm
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -130,6 +128,11 @@ def strip_markdown_code_blocks(text: str) -> str:
     text = re.sub(r"^```(?:json)?\s*\n?", "", text, flags=re.MULTILINE)
     text = re.sub(r"\n?```\s*$", "", text, flags=re.MULTILINE)
     return text.strip()
+
+
+def is_valid_slug(slug: str) -> bool:
+    """Check if slug is a valid 5-character alphanumeric string."""
+    return bool(re.match(r'^[a-z0-9]{5}$', slug))
 
 
 def load_prompt(supermarket: Optional[str]) -> str:
@@ -257,9 +260,12 @@ async def read_root():
     return FileResponse(BASE_DIR / "index.html")
 
 
-# Serve index.html for list view routes
-@app.get("/list/{list_id}")
+# Serve index.html for list view routes (must be after static mounts)
+@app.get("/{list_id}")
 async def list_page(list_id: str):
+    # Only serve for valid 5-char slugs to avoid catching other routes
+    if not is_valid_slug(list_id):
+        raise HTTPException(status_code=404, detail="Not found")
     return FileResponse(BASE_DIR / "index.html")
 
 
@@ -374,9 +380,7 @@ async def process_image(request: ProcessImageRequest):
 @app.get("/api/list/{list_id}", response_model=ShoppingListResponse)
 async def get_list(list_id: str):
     """Get a shopping list by ID."""
-    try:
-        UUID(list_id)
-    except ValueError:
+    if not is_valid_slug(list_id):
         raise HTTPException(status_code=400, detail="Invalid list ID format")
 
     list_data = database.get_shopping_list(list_id)
@@ -389,9 +393,7 @@ async def get_list(list_id: str):
 @app.put("/api/list/{list_id}/item/{item_id}")
 async def update_item(list_id: str, item_id: int, request: UpdateItemRequest):
     """Update the checked status of an item."""
-    try:
-        UUID(list_id)
-    except ValueError:
+    if not is_valid_slug(list_id):
         raise HTTPException(status_code=400, detail="Invalid list ID format")
 
     if not database.update_item_status(list_id, item_id, request.checked):

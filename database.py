@@ -1,8 +1,18 @@
 import os
+import secrets
 import sqlite3
-import uuid
+import string
 from contextlib import contextmanager
 from typing import List, Optional
+
+# Characters for generating short slugs (alphanumeric, no ambiguous chars)
+SLUG_CHARS = string.ascii_lowercase + string.digits
+SLUG_LENGTH = 5
+
+
+def generate_slug() -> str:
+    """Generate a random 5-character alphanumeric slug."""
+    return ''.join(secrets.choice(SLUG_CHARS) for _ in range(SLUG_LENGTH))
 
 # Get database path from environment variable, default to local directory
 DB_PATH = os.getenv('DB_PATH', 'shopping.db')
@@ -61,7 +71,7 @@ def init_db():
 
 def create_shopping_list(items: List[dict], supermarket: Optional[str] = None) -> str:
     """Create a new shopping list with items."""
-    list_id = str(uuid.uuid4())
+    list_id = generate_slug()
 
     with get_db() as conn:
         conn.execute(

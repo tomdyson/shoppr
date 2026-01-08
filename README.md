@@ -9,7 +9,7 @@ A mobile-first web app that turns messy shopping lists into organized, store-opt
 - **Automatic categorization**: Groups items by store area (produce, dairy, frozen, etc.)
 - **Store-specific ordering**: Orders items by typical supermarket layout for 8 UK stores
 - **Touch-friendly UI**: Mobile-first design with large tap targets and sticky headers
-- **Shareable lists**: UUID-based URLs for sharing with family members
+- **Shareable lists**: Short 5-character URLs for easy sharing (e.g., `/a3x9k`)
 - **Progress tracking**: Visual progress bar and item counts
 - **PWA support**: Install on your phone, works offline for saved lists
 - **No account required**: Just create and share lists
@@ -171,7 +171,7 @@ Content-Type: application/json
 
 ```json
 {
-  "list_id": "uuid-here",
+  "list_id": "a3x9k",
   "supermarket": "tesco",
   "supermarket_display": "Tesco",
   "groups": [
@@ -229,6 +229,7 @@ npm run build:css
 shoppr/
 ├── main.py                 # FastAPI application
 ├── database.py             # SQLite database layer
+├── cleanup.py              # Scheduled cleanup script
 ├── index.html              # Vue.js 2 single-page app
 ├── requirements.txt        # Python dependencies
 ├── package.json            # Node dependencies (Tailwind)
@@ -313,6 +314,17 @@ docker compose up -d
 ### Persistent Data
 
 Shopping lists are stored in a Docker volume (`shopping_data`) that persists across container restarts.
+
+### Scheduled Cleanup
+
+Shopping lists are automatically deleted after 28 days. Schedule the cleanup script via cron or your deployment platform:
+
+```bash
+# Run daily at 3am
+0 3 * * * python /app/cleanup.py
+```
+
+In Coolify, add this as a scheduled task pointing to `python /app/cleanup.py`.
 
 ## PWA Installation
 

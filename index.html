@@ -462,7 +462,7 @@
                     }
 
                     // Update URL
-                    window.history.pushState({}, '', `/list/${data.list_id}`);
+                    window.history.pushState({}, '', `/${data.list_id}`);
                 },
 
                 async loadList(listId) {
@@ -597,13 +597,11 @@
                 }
             },
             mounted() {
-                // Check if we're on a list page
+                // Check if we're on a list page (5-char alphanumeric slug)
                 const path = window.location.pathname;
-                if (path.startsWith('/list/')) {
-                    const listId = path.split('/')[2];
-                    if (listId) {
-                        this.loadList(listId);
-                    }
+                const match = path.match(/^\/([a-z0-9]{5})$/);
+                if (match) {
+                    this.loadList(match[1]);
                 }
 
                 // Handle paste event globally
