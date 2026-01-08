@@ -265,10 +265,15 @@ app.mount("/dist", StaticFiles(directory=BASE_DIR / "dist"), name="dist")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
-# Serve static image
+# Serve static images
 @app.get("/paris-figure.jpg")
 async def paris_figure():
     return FileResponse(BASE_DIR / "paris-figure.jpg")
+
+
+@app.get("/paris-figure-down.jpg")
+async def paris_figure_down():
+    return FileResponse(BASE_DIR / "paris-figure-down.jpg")
 
 
 # Serve PWA files
