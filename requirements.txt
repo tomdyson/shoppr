@@ -5,3 +5,4 @@ python-dotenv>=1.0.1
 llm>=0.19
 llm-gemini>=0.10
 aiofiles>=23.2.1
+weasyprint>=60.0
