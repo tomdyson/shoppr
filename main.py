@@ -7,11 +7,12 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
 import llm
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from weasyprint import HTML
 
 import database
 
@@ -396,6 +397,170 @@ async def update_item(list_id: str, item_id: int, request: UpdateItemRequest):
         raise HTTPException(status_code=404, detail="Item not found")
 
     return {"success": True}
+
+
+@app.get("/{list_id}.pdf")
+def get_list_pdf(request: Request, list_id: str):
+    """Generate and return a PDF for the shopping list."""
+    if not is_valid_slug(list_id):
+        raise HTTPException(status_code=400, detail="Invalid list ID format")
+
+    list_data = database.get_shopping_list(list_id)
+    if list_data is None:
+        raise HTTPException(status_code=404, detail="Shopping list not found")
+
+    # Generate HTML for PDF
+    base_url = str(request.base_url).rstrip('/')
+    html_content = generate_pdf_html(list_data, base_url)
+
+    # Generate PDF
+    pdf_bytes = HTML(string=html_content).write_pdf()
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={list_id}.pdf"}
+    )
+
+
+def generate_pdf_html(list_data: dict, base_url: str) -> str:
+    """Generate HTML for the PDF shopping list."""
+    groups = []
+    for group in list_data['groups']:
+        area_display = AREA_DISPLAY_NAMES.get(group['area'], group['area'].title())
+        groups.append({
+            "area_display": area_display,
+            "items": group['items']
+        })
+
+    supermarket_display = SUPERMARKETS.get(list_data['supermarket']) if list_data['supermarket'] else "Shopping List"
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Shopping List</title>
+        <style>
+            @page {{
+                size: A4;
+                margin: 2cm;
+            }}
+            body {{
+                font-family: sans-serif;
+                font-size: 12pt;
+                color: #333;
+                line-height: 1.5;
+            }}
+            h1 {{
+                font-size: 18pt;
+                margin-bottom: 0.5cm;
+                color: #000;
+                border-bottom: 2px solid #000;
+                padding-bottom: 0.2cm;
+            }}
+            .group {{
+                margin-bottom: 1cm;
+                page-break-inside: avoid;
+            }}
+            .group-header {{
+                font-weight: bold;
+                font-size: 14pt;
+                margin-bottom: 0.3cm;
+                color: #444;
+                text-transform: uppercase;
+                border-bottom: 1px solid #ccc;
+            }}
+            .item {{
+                display: flex;
+                align-items: center;
+                margin-bottom: 0.2cm;
+            }}
+            .checkbox {{
+                display: inline-block;
+                width: 12px;
+                height: 12px;
+                border: 1px solid #000;
+                margin-right: 10px;
+            }}
+            .checkbox.checked {{
+                background-color: #ddd;
+                position: relative;
+            }}
+            .checkbox.checked::after {{
+                content: '';
+                position: absolute;
+                left: 3px;
+                top: 3px;
+                width: 6px;
+                height: 6px;
+                background-color: #000;
+            }}
+            .item-text {{
+                flex: 1;
+            }}
+            .item-text.checked {{
+                text-decoration: line-through;
+                color: #888;
+            }}
+            .quantity {{
+                color: #666;
+                font-size: 0.9em;
+                margin-left: 5px;
+            }}
+            .footer {{
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                text-align: center;
+                font-size: 9pt;
+                color: #999;
+                border-top: 1px solid #eee;
+                padding-top: 0.5cm;
+            }}
+        </style>
+    </head>
+    <body>
+        <h1>{supermarket_display}</h1>
+    """
+
+    for group in groups:
+        if not group['items']:
+            continue
+
+        html += f"""
+        <div class="group">
+            <div class="group-header">{group['area_display']}</div>
+        """
+
+        for item in group['items']:
+            checked_class = " checked" if item['checked'] else ""
+            quantity_html = f'<span class="quantity">({item["quantity"]})</span>' if item.get('quantity') else ''
+
+            html += f"""
+            <div class="item">
+                <div class="checkbox{checked_class}"></div>
+                <div class="item-text{checked_class}">
+                    {item['name']}{quantity_html}
+                </div>
+            </div>
+            """
+
+        html += "</div>"
+
+    # Add footer with URL
+    list_url = f"{base_url}/{list_data['list_id']}"
+
+    html += f"""
+        <div class="footer">
+            List: {list_url}
+        </div>
+    </body>
+    </html>
+    """
+
+    return html
 
 
 def format_list_response(list_data: dict) -> ShoppingListResponse:

@@ -260,10 +260,10 @@
 
                 <!-- Action buttons -->
                 <div class="flex space-x-2 mt-4 no-print">
-                    <button @click="printList"
-                        class="hover:opacity-75 cursor-pointer bg-slate-100 px-2 py-1 font-light rounded text-lg">
+                    <a :href="'/' + listId + '.pdf'" target="_blank"
+                        class="hover:opacity-75 cursor-pointer bg-slate-100 px-2 py-1 font-light rounded text-lg text-slate-700 no-underline">
                         Print
-                    </button>
+                    </a>
                     <button @click="shareList"
                         class="hover:opacity-75 cursor-pointer bg-green-100 px-2 py-1 font-light rounded text-lg">
                         Share
@@ -567,10 +567,6 @@
                 clearImage() {
                     this.imagePreview = null;
                     this.imageData = null;
-                },
-
-                printList() {
-                    window.print();
                 },
 
                 shareList() {
