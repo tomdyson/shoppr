@@ -5,8 +5,8 @@ import re
 import time
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
-import llm
 from dotenv import load_dotenv
+from litellm_client import LiteLLMClient
 from fastapi import FastAPI, HTTPException, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -35,22 +35,22 @@ app.add_middleware(
 )
 
 # Get environment variables
+LITELLM_PROXY_URL = os.getenv("LITELLM_PROXY_URL", "https://litellm.co.tomd.org")
+LITELLM_API_KEY = os.getenv("LITELLM_API_KEY")
+LITELLM_MODEL_PREFIX = os.getenv("LITELLM_MODEL_PREFIX", "gemini/")
 MODEL_NAME = os.getenv("LLM_MODEL", "gemini-2.5-flash-lite")
 VISION_MODEL_NAME = os.getenv("LLM_VISION_MODEL", "gemini-2.5-flash")
-API_KEY = os.getenv("LLM_API_KEY")
 
-# Pricing per 1M tokens (USD)
-# Users can update this dictionary to reflect current pricing or add new models
-MODEL_PRICING = {
-    "gemini-2.5-flash-lite": {"input": 0.075, "output": 0.30},
-    "gemini-2.5-flash": {"input": 0.075, "output": 0.30},
-    "gemini-2.0-flash-lite": {"input": 0.075, "output": 0.30},
-    "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
-    "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
-    "gemini-3-flash-preview": {"input": 0.50, "output": 3.00},
-    # Fallback default
-    "default": {"input": 0.10, "output": 0.40}
-}
+# Validate configuration
+if not LITELLM_API_KEY:
+    raise ValueError("LITELLM_API_KEY environment variable is required")
+
+# Initialize global litellm client
+litellm_client = LiteLLMClient(
+    base_url=LITELLM_PROXY_URL,
+    api_key=LITELLM_API_KEY,
+    model_prefix=LITELLM_MODEL_PREFIX
+)
 
 # Supermarket options
 SUPERMARKETS = {
@@ -167,20 +167,8 @@ def load_prompt(supermarket: Optional[str]) -> str:
         return f.read()
 
 
-def calculate_cost(model_name: str, input_tokens: int, output_tokens: int) -> float:
-    """Calculate cost in USD for the given usage."""
-    pricing = MODEL_PRICING.get(model_name, MODEL_PRICING.get("default"))
-    input_cost = (input_tokens / 1_000_000) * pricing["input"]
-    output_cost = (output_tokens / 1_000_000) * pricing["output"]
-    return input_cost + output_cost
-
-
 def process_items_with_llm(items_text: str, supermarket: Optional[str]) -> Tuple[List[dict], Dict[str, Any]]:
     """Process shopping list text into categorized items using LLM."""
-    model = llm.get_model(MODEL_NAME)
-    if API_KEY:
-        model.key = API_KEY
-
     store_layout = load_prompt(supermarket)
 
     system_prompt = f"""You are a shopping list organizer. Parse the input into a structured list.
@@ -201,69 +189,68 @@ Example output:
 
 IMPORTANT: Respond ONLY with the JSON array, no additional text."""
 
-    response = model.prompt(items_text, system=system_prompt)
+    # Build messages in OpenAI format
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": items_text}
+    ]
 
-    # Log token usage
+    # Make request via litellm proxy
+    raw_response, usage_stats = litellm_client.chat_completion(
+        model=MODEL_NAME,
+        messages=messages
+    )
+
+    # Log for debugging
     print(f"Model used: {MODEL_NAME}")
-    usage_stats = {
-        "model": MODEL_NAME,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cost": 0.0
-    }
-
-    usage = response.usage()
-    if usage:
-        print(f"Token count - Input: {usage.input}, Output: {usage.output}")
-        usage_stats["input_tokens"] = usage.input
-        usage_stats["output_tokens"] = usage.output
-        usage_stats["cost"] = calculate_cost(MODEL_NAME, usage.input, usage.output)
-
-    raw_response = response.text()
+    print(f"Token count - Input: {usage_stats['input_tokens']}, Output: {usage_stats['output_tokens']}, Cost: ${usage_stats['cost']:.6f}")
     print("Raw LLM response:", raw_response)
 
+    # Parse response
     cleaned_response = strip_markdown_code_blocks(raw_response)
     return json.loads(cleaned_response), usage_stats
 
 
 def ocr_image_with_llm(image_base64: str) -> Tuple[str, Dict[str, Any]]:
     """Extract text from image using vision-capable LLM."""
-    model = llm.get_model(VISION_MODEL_NAME)
-    if API_KEY:
-        model.key = API_KEY
-
-    # Decode base64 to bytes
     # Handle data URL format (e.g., "data:image/png;base64,...")
     if ',' in image_base64:
         image_base64 = image_base64.split(',')[1]
 
-    image_bytes = base64.b64decode(image_base64)
-
-    response = model.prompt(
+    prompt_text = (
         "Extract all text from this shopping list image. "
         "Return only the items, one per line. "
         "Include quantities if visible. "
-        "Do not add any commentary or formatting.",
-        attachments=[llm.Attachment(content=image_bytes, type="image/png")]
+        "Do not add any commentary or formatting."
     )
 
-    # Log token usage
+    # Build messages with vision content
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt_text},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/png;base64,{image_base64}"
+                    }
+                }
+            ]
+        }
+    ]
+
+    # Make request via litellm proxy
+    raw_response, usage_stats = litellm_client.chat_completion(
+        model=VISION_MODEL_NAME,
+        messages=messages
+    )
+
+    # Log for debugging
     print(f"Vision model used: {VISION_MODEL_NAME}")
-    usage_stats = {
-        "model": VISION_MODEL_NAME,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cost": 0.0
-    }
+    print(f"Token count - Input: {usage_stats['input_tokens']}, Output: {usage_stats['output_tokens']}, Cost: ${usage_stats['cost']:.6f}")
 
-    usage = response.usage()
-    if usage:
-        print(f"Token count - Input: {usage.input}, Output: {usage.output}")
-        usage_stats["input_tokens"] = usage.input
-        usage_stats["output_tokens"] = usage.output
-        usage_stats["cost"] = calculate_cost(VISION_MODEL_NAME, usage.input, usage.output)
-
-    return response.text(), usage_stats
+    return raw_response, usage_stats
 
 
 def process_edit_with_llm(
@@ -282,10 +269,6 @@ def process_edit_with_llm(
     Returns:
         Tuple of (new_items, changes_dict, usage_stats)
     """
-    model = llm.get_model(MODEL_NAME)
-    if API_KEY:
-        model.key = API_KEY
-
     store_layout = load_prompt(supermarket)
 
     # Format existing items for the prompt
@@ -338,27 +321,24 @@ IMPORTANT: Respond ONLY with the JSON object, no additional text."""
 EDIT INSTRUCTIONS:
 {edit_text}"""
 
-    response = model.prompt(user_prompt, system=system_prompt)
+    # Build messages in OpenAI format
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
 
-    # Log token usage
+    # Make request via litellm proxy
+    raw_response, usage_stats = litellm_client.chat_completion(
+        model=MODEL_NAME,
+        messages=messages
+    )
+
+    # Log for debugging
     print(f"Edit model used: {MODEL_NAME}")
-    usage_stats = {
-        "model": MODEL_NAME,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cost": 0.0
-    }
-
-    usage = response.usage()
-    if usage:
-        print(f"Token count - Input: {usage.input}, Output: {usage.output}")
-        usage_stats["input_tokens"] = usage.input
-        usage_stats["output_tokens"] = usage.output
-        usage_stats["cost"] = calculate_cost(MODEL_NAME, usage.input, usage.output)
-
-    raw_response = response.text()
+    print(f"Token count - Input: {usage_stats['input_tokens']}, Output: {usage_stats['output_tokens']}, Cost: ${usage_stats['cost']:.6f}")
     print("Raw LLM edit response:", raw_response)
 
+    # Parse and validate response
     cleaned_response = strip_markdown_code_blocks(raw_response)
     result = json.loads(cleaned_response)
 

@@ -35,7 +35,7 @@ Each supermarket has a custom prompt defining its typical store layout, so items
 | Frontend | Vue.js 2 (CDN) |
 | Styling | Tailwind CSS |
 | Database | SQLite |
-| LLM | Gemini via `llm` library |
+| LLM | Gemini via LiteLLM Proxy |
 | Deployment | Docker |
 
 ## Quick Start
@@ -44,7 +44,7 @@ Each supermarket has a custom prompt defining its typical store layout, so items
 
 - Python 3.11+
 - Node.js 18+ (for Tailwind CSS build)
-- A Gemini API key (or other LLM provider supported by the `llm` library)
+- Access to a LiteLLM proxy with API key (or set up your own)
 
 ### Installation
 
@@ -72,22 +72,29 @@ cp .env.example .env
 Edit `.env` with your settings:
 
 ```env
-# LLM Configuration
-LLM_MODEL=gemini-2.5-flash-lite    # Model for categorization
-LLM_VISION_MODEL=gemini-2.5-flash  # Model for OCR (must support vision)
-LLM_API_KEY=your-api-key-here
+# LLM Configuration - LiteLLM Proxy
+LITELLM_PROXY_URL=https://litellm.co.tomd.org
+LITELLM_API_KEY=your-litellm-proxy-key-here
+LITELLM_MODEL_PREFIX=gemini/       # Provider prefix (optional, set to "" if using full names)
+LLM_MODEL=gemini/gemini-2.5-flash-lite    # Model for categorization
+LLM_VISION_MODEL=gemini/gemini-2.5-flash  # Model for OCR (must support vision)
 
 # Database
 DB_PATH=shopping.db
 ```
 
-#### Supported LLM Providers
+#### LiteLLM Proxy Setup
 
-The app uses Simon Willison's [`llm`](https://llm.datasette.io/) library, which supports many providers:
+The app uses a [LiteLLM proxy](https://docs.litellm.ai/docs/proxy/quick_start) for LLM requests, which provides:
 
-- **Gemini**: `pip install llm-gemini` (recommended for vision)
-- **Claude**: `pip install llm-anthropic`
-- **OpenAI**: Built-in support
+- **Unified API**: Single interface for multiple LLM providers (OpenAI, Anthropic, Google, etc.)
+- **Automatic cost tracking**: Costs tracked via response headers
+- **Request logging**: Monitor usage and debugging
+- **Load balancing**: Distribute requests across providers
+
+**Model Naming**: Model names should include the provider prefix (e.g., `gemini/gemini-2.5-flash-lite`) to match your proxy configuration. The `LITELLM_MODEL_PREFIX` setting can automatically add the prefix if you use short names.
+
+Set up your own proxy or use an existing one. The proxy handles provider-specific API keys and routing.
 
 ### Running the App
 
@@ -383,6 +390,6 @@ MIT License - see LICENSE file for details.
 ## Acknowledgments
 
 - Built with [FastAPI](https://fastapi.tiangolo.com/)
-- LLM integration via [llm](https://llm.datasette.io/) by Simon Willison
+- LLM integration via [LiteLLM Proxy](https://docs.litellm.ai/)
 - Styled with [Tailwind CSS](https://tailwindcss.com/)
 - Frontend powered by [Vue.js](https://vuejs.org/)
