@@ -27,8 +27,8 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application files
-COPY main.py database.py cleanup.py litellm_client.py ./
+# Copy application files (all Python modules)
+COPY *.py ./
 COPY index.html sw.js manifest.json paris-figure.jpg paris-figure-down.jpg ./
 COPY prompts/ ./prompts/
 COPY static/ ./static/
