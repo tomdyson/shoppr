@@ -165,7 +165,7 @@
                 <!-- Supermarket selector -->
                 <div class="mb-4">
                     <select id="supermarket" v-model="selectedSupermarket"
-                        class="text-lg font-light font-mono border border-gray-300 px-2 py-1 mb-1 w-full rounded">
+                        class="text-lg font-light border border-gray-300 px-2 py-1 mb-1 w-full rounded">
                         <option value="">Any supermarket</option>
                         <option v-for="(name, key) in supermarkets" :key="key" :value="key">{{ name }}</option>
                     </select>
