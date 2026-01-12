@@ -47,7 +47,10 @@ def init_db():
         cursor = conn.execute('PRAGMA table_info(shopping_lists)')
         columns = {row[1] for row in cursor.fetchall()}
         if 'updated_at' not in columns:
-            conn.execute('ALTER TABLE shopping_lists ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+            # SQLite doesn't support non-constant defaults in ALTER TABLE
+            conn.execute('ALTER TABLE shopping_lists ADD COLUMN updated_at TIMESTAMP')
+            # Update existing rows to set the timestamp
+            conn.execute('UPDATE shopping_lists SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL')
 
         conn.execute('''
         CREATE TABLE IF NOT EXISTS shopping_items (
