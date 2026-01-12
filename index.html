@@ -775,6 +775,7 @@
                         // Auto-hide changes after 10 seconds
                         setTimeout(() => {
                             this.showChanges = false;
+                            this.lastChanges = null;
                         }, 10000);
 
                     } catch (error) {
