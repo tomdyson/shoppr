@@ -170,7 +170,7 @@
                 <!-- Supermarket selector -->
                 <div class="mb-4">
                     <select id="supermarket" v-model="selectedSupermarket"
-                        class="text-lg font-light border border-gray-300 px-2 py-1 mb-1 w-full rounded">
+                        class="text-lg border border-gray-300 px-2 py-1 mb-1 w-full rounded">
                         <option value="">Any supermarket</option>
                         <option v-for="(name, key) in supermarkets" :key="key" :value="key">{{ name }}</option>
                     </select>
@@ -221,7 +221,7 @@
 
                 <!-- Submit button -->
                 <input id="submit"
-                    class="hover:opacity-75 mt-3 cursor-pointer bg-cyan-100 px-2 py-1 font-light rounded text-lg mb-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                    class="hover:opacity-75 mt-3 cursor-pointer bg-cyan-100 px-2 py-1 rounded text-lg mb-1 disabled:opacity-50 disabled:cursor-not-allowed"
                     type="submit" :value="isLoading ? loadingMessage : 'Create shopping list'"
                     :disabled="isLoading || (!inputText.trim() && !imageData)" />
 
@@ -295,12 +295,12 @@
                     <div class="flex space-x-2">
                         <button @click="submitEdit"
                             :disabled="isEditLoading || !editText.trim()"
-                            class="hover:opacity-75 cursor-pointer bg-rose-200 px-3 py-1 font-light rounded text-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                            class="hover:opacity-75 cursor-pointer bg-rose-200 px-3 py-1 rounded text-lg disabled:opacity-50 disabled:cursor-not-allowed">
                             {{ isEditLoading ? 'Updating...' : 'Update list' }}
                         </button>
                         <button @click="cancelEdit"
                             :disabled="isEditLoading"
-                            class="hover:opacity-75 cursor-pointer bg-slate-100 px-3 py-1 font-light rounded text-lg">
+                            class="hover:opacity-75 cursor-pointer bg-slate-100 px-3 py-1 rounded text-lg">
                             Cancel
                         </button>
                     </div>
@@ -334,15 +334,15 @@
                 <!-- Action buttons -->
                 <div class="flex space-x-2 mt-4 no-print">
                     <a :href="'/' + listId + '.pdf'" target="_blank"
-                        class="hover:opacity-75 cursor-pointer bg-amber-100 px-2 py-1 font-light rounded text-lg text-slate-700 no-underline">
+                        class="hover:opacity-75 cursor-pointer bg-amber-100 px-2 py-1 rounded text-lg text-slate-700 no-underline">
                         Print
                     </a>
                     <button @click="startEdit" v-if="!isEditing"
-                        class="hover:opacity-75 cursor-pointer bg-rose-100 px-2 py-1 font-light rounded text-lg">
+                        class="hover:opacity-75 cursor-pointer bg-rose-100 px-2 py-1 rounded text-lg">
                         Edit
                     </button>
                     <button @click="shareList"
-                        class="hover:opacity-75 cursor-pointer bg-green-100 px-2 py-1 font-light rounded text-lg">
+                        class="hover:opacity-75 cursor-pointer bg-green-100 px-2 py-1 rounded text-lg">
                         Share
                     </button>
                 </div>
