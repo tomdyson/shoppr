@@ -6,3 +6,4 @@ openai>=1.0.0
 httpx>=0.24.0
 aiofiles>=23.2.1
 weasyprint>=60.0
+pytest>=7.4.0

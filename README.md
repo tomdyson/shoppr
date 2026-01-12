@@ -230,6 +230,29 @@ npm run watch:css
 npm run build:css
 ```
 
+### Testing
+
+Run the automated test suite to verify functionality:
+
+```bash
+# Activate virtual environment
+source .venv/bin/activate
+
+# Run all tests
+pytest test_main.py -v
+
+# Run specific test
+pytest test_main.py::test_api_process_text -v
+```
+
+The test suite (`test_main.py`) covers:
+- Database operations (CRUD operations for lists and items)
+- API endpoints (text/image processing, list retrieval and editing)
+- Input validation and error handling
+- Slug generation and validation
+
+All tests use mocked LLM calls to avoid API costs during testing.
+
 ### Project Structure
 
 ```

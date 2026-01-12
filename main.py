@@ -439,6 +439,8 @@ async def process_text(request: ProcessTextRequest):
         }
         return response
 
+    except HTTPException:
+        raise
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"Failed to parse LLM response: {str(e)}")
     except Exception as e:
@@ -486,6 +488,8 @@ async def process_image(request: ProcessImageRequest):
         }
         return response
 
+    except HTTPException:
+        raise
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"Failed to parse LLM response: {str(e)}")
     except Exception as e:
@@ -598,6 +602,8 @@ async def edit_list(list_id: str, request: EditListRequest):
             meta={"edit": edit_usage}
         )
 
+    except HTTPException:
+        raise
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"Failed to parse LLM response: {str(e)}")
     except Exception as e:

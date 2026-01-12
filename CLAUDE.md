@@ -88,6 +88,34 @@ All local development and testing commands should be run within the activated vi
 
 ## Testing Before Deploy
 
+### Run Automated Tests
+
+Always run the test suite before deploying changes:
+
+```bash
+# Activate virtual environment
+source .venv/bin/activate
+
+# Run all tests
+pytest test_main.py -v
+
+# Run specific test
+pytest test_main.py::test_api_process_text -v
+
+# Run with coverage (if pytest-cov installed)
+pytest test_main.py --cov=main --cov=database
+```
+
+The test suite (`test_main.py`) includes 10 critical tests covering:
+- Database operations (create, retrieve, update lists and items)
+- API endpoints (process text/image, get/edit lists, update items)
+- Validation (slug format, supermarket validation)
+- Error handling (invalid inputs, 404s, etc.)
+
+All LLM calls are mocked, so tests run without API costs.
+
+### Manual Testing
+
 ```bash
 # Local testing (remember to activate .venv first!)
 source .venv/bin/activate
