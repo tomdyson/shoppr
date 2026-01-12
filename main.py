@@ -117,11 +117,30 @@ class ShoppingListResponse(BaseModel):
     supermarket: Optional[str]
     supermarket_display: Optional[str]
     groups: List[ItemGroup]
+    updated_at: Optional[str] = None
     meta: Optional[Dict[str, Any]] = None
 
 
 class UpdateItemRequest(BaseModel):
     checked: bool
+
+
+class EditListRequest(BaseModel):
+    text: str  # Natural language edit instructions
+
+
+class EditListResponse(BaseModel):
+    list_id: str
+    supermarket: Optional[str]
+    supermarket_display: Optional[str]
+    groups: List[ItemGroup]
+    changes: Dict[str, List[str]]  # {added: [], removed: [], kept: []}
+    updated_at: Optional[str] = None
+    meta: Optional[Dict[str, Any]] = None
+
+
+class ListVersionResponse(BaseModel):
+    updated_at: Optional[str]
 
 
 def strip_markdown_code_blocks(text: str) -> str:
@@ -245,6 +264,112 @@ def ocr_image_with_llm(image_base64: str) -> Tuple[str, Dict[str, Any]]:
         usage_stats["cost"] = calculate_cost(VISION_MODEL_NAME, usage.input, usage.output)
 
     return response.text(), usage_stats
+
+
+def process_edit_with_llm(
+    existing_items: List[dict],
+    edit_text: str,
+    supermarket: Optional[str]
+) -> Tuple[List[dict], Dict[str, List[str]], Dict[str, Any]]:
+    """
+    Process edit instructions to modify an existing shopping list.
+
+    Args:
+        existing_items: Current items in the list
+        edit_text: Natural language edit instructions
+        supermarket: The supermarket for categorization
+
+    Returns:
+        Tuple of (new_items, changes_dict, usage_stats)
+    """
+    model = llm.get_model(MODEL_NAME)
+    if API_KEY:
+        model.key = API_KEY
+
+    store_layout = load_prompt(supermarket)
+
+    # Format existing items for the prompt
+    existing_list = "\n".join([
+        f"- {item['name']}" + (f" ({item['quantity']})" if item.get('quantity') else "")
+        for item in existing_items
+    ])
+
+    system_prompt = f"""You are a shopping list editor. You will receive a current shopping list and edit instructions.
+Apply the edit instructions to modify the list.
+
+{store_layout}
+
+INSTRUCTIONS FOR EDITING:
+- "add X" or just "X" means add item X to the list
+- "remove X" or "delete X" means remove item X
+- "change X to Y" or "replace X with Y" means replace item X with Y
+- You can interpret natural language like "I don't need the apples anymore" as "remove apples"
+- Be smart about matching items - "remove milk" should remove "Semi-skimmed milk" if that's what's in the list
+- Keep all existing items that weren't explicitly removed or changed
+
+Respond with a JSON object containing:
+1. "items": Array of all items in the updated list (same format as before)
+2. "added": Array of item names that were newly added
+3. "removed": Array of item names that were removed
+4. "kept": Array of item names that were kept unchanged
+
+Each item in the "items" array must have:
+- "name": Item name (cleaned up, standardized)
+- "quantity": Quantity if specified (e.g., "2", "500g"), null if not specified
+- "area": Category key from the layout above (e.g., "dairy", "produce")
+- "area_order": Number from the layout order above
+
+Example response:
+{{
+    "items": [
+        {{"name": "Semi-skimmed milk", "quantity": "2L", "area": "dairy", "area_order": 3}},
+        {{"name": "Salmon fillets", "quantity": "400g", "area": "meat", "area_order": 4}}
+    ],
+    "added": ["Salmon fillets"],
+    "removed": ["Bananas"],
+    "kept": ["Semi-skimmed milk"]
+}}
+
+IMPORTANT: Respond ONLY with the JSON object, no additional text."""
+
+    user_prompt = f"""CURRENT LIST:
+{existing_list}
+
+EDIT INSTRUCTIONS:
+{edit_text}"""
+
+    response = model.prompt(user_prompt, system=system_prompt)
+
+    # Log token usage
+    print(f"Edit model used: {MODEL_NAME}")
+    usage_stats = {
+        "model": MODEL_NAME,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost": 0.0
+    }
+
+    usage = response.usage()
+    if usage:
+        print(f"Token count - Input: {usage.input}, Output: {usage.output}")
+        usage_stats["input_tokens"] = usage.input
+        usage_stats["output_tokens"] = usage.output
+        usage_stats["cost"] = calculate_cost(MODEL_NAME, usage.input, usage.output)
+
+    raw_response = response.text()
+    print("Raw LLM edit response:", raw_response)
+
+    cleaned_response = strip_markdown_code_blocks(raw_response)
+    result = json.loads(cleaned_response)
+
+    items = result.get("items", [])
+    changes = {
+        "added": result.get("added", []),
+        "removed": result.get("removed", []),
+        "kept": result.get("kept", [])
+    }
+
+    return items, changes, usage_stats
 
 
 # Initialize the database when the app starts
@@ -397,6 +522,93 @@ async def update_item(list_id: str, item_id: int, request: UpdateItemRequest):
         raise HTTPException(status_code=404, detail="Item not found")
 
     return {"success": True}
+
+
+@app.get("/api/list/{list_id}/version", response_model=ListVersionResponse)
+async def get_list_version(list_id: str):
+    """Get the current version (updated_at) of a list for polling."""
+    if not is_valid_slug(list_id):
+        raise HTTPException(status_code=400, detail="Invalid list ID format")
+
+    updated_at = database.get_list_version(list_id)
+    if updated_at is None:
+        raise HTTPException(status_code=404, detail="List not found")
+
+    return ListVersionResponse(updated_at=updated_at)
+
+
+@app.post("/api/list/{list_id}/edit", response_model=EditListResponse)
+async def edit_list(list_id: str, request: EditListRequest):
+    """Edit an existing shopping list using natural language instructions."""
+    if not is_valid_slug(list_id):
+        raise HTTPException(status_code=400, detail="Invalid list ID format")
+
+    try:
+        # Get the existing list
+        list_data = database.get_shopping_list(list_id)
+        if list_data is None:
+            raise HTTPException(status_code=404, detail="List not found")
+
+        # Flatten existing items from groups
+        existing_items = []
+        for group in list_data['groups']:
+            for item in group['items']:
+                existing_items.append({
+                    'name': item['name'],
+                    'quantity': item.get('quantity')
+                })
+
+        # Process edit instructions with LLM
+        new_items, changes, edit_usage = process_edit_with_llm(
+            existing_items,
+            request.text,
+            list_data['supermarket']
+        )
+
+        # Validate new items
+        if not isinstance(new_items, list):
+            raise HTTPException(status_code=500, detail="Invalid response from LLM")
+
+        for item in new_items:
+            if not all(k in item for k in ("name", "area", "area_order")):
+                raise HTTPException(status_code=500, detail="Invalid item format from LLM")
+
+        # Update the database
+        if not database.update_shopping_list(list_id, new_items, changes):
+            raise HTTPException(status_code=500, detail="Failed to update list")
+
+        # Get the updated list
+        updated_list = database.get_shopping_list(list_id)
+
+        # Format response
+        groups = []
+        for group in updated_list['groups']:
+            area_display = AREA_DISPLAY_NAMES.get(group['area'], group['area'].title())
+            groups.append(ItemGroup(
+                area=group['area'],
+                area_display=area_display,
+                items=[ShoppingItem(**item) for item in group['items']]
+            ))
+
+        supermarket_display = None
+        if updated_list['supermarket']:
+            supermarket_display = SUPERMARKETS.get(updated_list['supermarket'])
+
+        return EditListResponse(
+            list_id=list_id,
+            supermarket=updated_list['supermarket'],
+            supermarket_display=supermarket_display,
+            groups=groups,
+            changes=changes,
+            updated_at=updated_list.get('updated_at'),
+            meta={"edit": edit_usage}
+        )
+
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to parse LLM response: {str(e)}")
+    except Exception as e:
+        print(f"Error editing list: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error editing list: {str(e)}")
 
 
 @app.get("/{list_id}.pdf")
@@ -583,6 +795,7 @@ def format_list_response(list_data: dict) -> ShoppingListResponse:
         supermarket=list_data['supermarket'],
         supermarket_display=supermarket_display,
         groups=groups,
+        updated_at=list_data.get('updated_at'),
         meta=None  # Explicitly set meta to None by default
     )
 

@@ -38,9 +38,16 @@ def init_db():
         CREATE TABLE IF NOT EXISTS shopping_lists (
             id TEXT PRIMARY KEY,
             supermarket TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         ''')
+
+        # Add updated_at column if it doesn't exist (migration for existing DBs)
+        try:
+            conn.execute('ALTER TABLE shopping_lists ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
         conn.execute('''
         CREATE TABLE IF NOT EXISTS shopping_items (
@@ -104,7 +111,7 @@ def get_shopping_list(list_id: str) -> Optional[dict]:
     with get_db() as conn:
         # Check if list exists and get supermarket
         list_row = conn.execute(
-            'SELECT id, supermarket FROM shopping_lists WHERE id = ?',
+            'SELECT id, supermarket, updated_at FROM shopping_lists WHERE id = ?',
             (list_id,)
         ).fetchone()
 
@@ -142,6 +149,7 @@ def get_shopping_list(list_id: str) -> Optional[dict]:
         return {
             'list_id': list_row['id'],
             'supermarket': list_row['supermarket'],
+            'updated_at': list_row['updated_at'],
             'groups': sorted_groups
         }
 
@@ -161,6 +169,11 @@ def update_item_status(list_id: str, item_id: int, checked: bool) -> bool:
         conn.execute(
             'UPDATE shopping_items SET checked = ? WHERE id = ?',
             (checked, item_id)
+        )
+        # Update the list's updated_at timestamp
+        conn.execute(
+            'UPDATE shopping_lists SET updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            (list_id,)
         )
         conn.commit()
         return True
@@ -184,3 +197,79 @@ def get_list_progress(list_id: str) -> Optional[dict]:
             'total': result['total'],
             'checked': result['checked'] or 0
         }
+
+
+def get_list_version(list_id: str) -> Optional[str]:
+    """Get just the updated_at timestamp for polling."""
+    with get_db() as conn:
+        result = conn.execute(
+            'SELECT updated_at FROM shopping_lists WHERE id = ?',
+            (list_id,)
+        ).fetchone()
+
+        if not result:
+            return None
+        return result['updated_at']
+
+
+def update_shopping_list(list_id: str, new_items: List[dict], changes: dict) -> bool:
+    """
+    Update a shopping list with new items while preserving checked status.
+
+    Args:
+        list_id: The list ID to update
+        new_items: List of new items from LLM with name, quantity, area, area_order
+        changes: Dict with 'kept', 'added', 'removed' item names for tracking
+
+    Returns:
+        True if successful, False otherwise
+    """
+    with get_db() as conn:
+        # Verify list exists
+        list_row = conn.execute(
+            'SELECT id FROM shopping_lists WHERE id = ?',
+            (list_id,)
+        ).fetchone()
+
+        if not list_row:
+            return False
+
+        # Get existing items with their checked status
+        existing_items = conn.execute('''
+        SELECT name, checked FROM shopping_items WHERE list_id = ?
+        ''', (list_id,)).fetchall()
+
+        # Create a map of item names to checked status (case-insensitive)
+        checked_status = {item['name'].lower(): bool(item['checked']) for item in existing_items}
+
+        # Delete all existing items
+        conn.execute('DELETE FROM shopping_items WHERE list_id = ?', (list_id,))
+
+        # Insert new items, preserving checked status where names match
+        for i, item in enumerate(new_items):
+            item_name_lower = item['name'].lower()
+            # Preserve checked status if item existed before
+            was_checked = checked_status.get(item_name_lower, False)
+
+            conn.execute('''
+            INSERT INTO shopping_items
+            (list_id, name, area, area_order, item_order, quantity, checked)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                list_id,
+                item['name'],
+                item['area'],
+                item['area_order'],
+                i,
+                item.get('quantity'),
+                was_checked
+            ))
+
+        # Update the updated_at timestamp
+        conn.execute(
+            'UPDATE shopping_lists SET updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            (list_id,)
+        )
+
+        conn.commit()
+        return True

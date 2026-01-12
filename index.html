@@ -46,6 +46,11 @@
             background-color: rgb(251 113 133);
         }
 
+        /* Emerald highlight for newly added items */
+        .item-row.bg-emerald-400 {
+            background-color: rgb(52 211 153);
+        }
+
         kbd {
             font-family: ui-monospace, monospace;
             border: 1px solid #e2e8f0;
@@ -233,14 +238,19 @@
                         <div class="group-header text-sm text-rose-100 uppercase tracking-wide mb-1">{{
                             group.area_display }}</div>
                         <div v-for="item in group.items" :key="item.id" class="item-row"
-                            :class="{'bg-rose-400': item.id === selectedItemId }"
+                            :class="{
+                                'bg-rose-400': item.id === selectedItemId,
+                                'bg-emerald-400': isItemAdded(item.name) && item.id !== selectedItemId
+                            }"
                             @click="selectedItemId = item.id">
                             <input type="checkbox" :id="'item-' + item.id" :checked="item.checked"
                                 @change="toggleItem(item)"
                                 class="mr-2 h-4 w-4 rounded border-gray-300 text-rose-400 focus:ring-rose-300 cursor-pointer">
                             <span :class="{'line-through': item.checked }" class="leading-tight">
-                                <div>{{ item.name }}<span v-if="item.quantity" class="text-rose-100 text-sm ml-1">({{
-                                        item.quantity }})</span></div>
+                                <div>
+                                    <span v-if="isItemAdded(item.name)" class="text-xs mr-1">+</span>{{ item.name }}<span v-if="item.quantity" class="text-rose-100 text-sm ml-1">({{
+                                        item.quantity }})</span>
+                                </div>
                             </span>
                         </div>
                     </div>
@@ -258,12 +268,72 @@
                     All done! Shopping complete.
                 </div>
 
+                <!-- Remote update notification -->
+                <div v-if="hasRemoteUpdate"
+                    class="no-print mb-4 p-3 bg-amber-100 text-amber-800 rounded-lg flex items-center justify-between">
+                    <span>This list has been updated elsewhere.</span>
+                    <button @click="refreshList"
+                        class="px-3 py-1 bg-amber-200 hover:bg-amber-300 rounded font-medium">
+                        Refresh
+                    </button>
+                </div>
+
+                <!-- Edit textarea (shown when editing) -->
+                <div v-if="isEditing" class="no-print mb-4">
+                    <textarea ref="editTextarea" v-model="editText" rows="3"
+                        class="text-lg font-light border border-gray-300 px-2 py-1 mb-2 w-full rounded resize-none overflow-hidden min-h-[80px] leading-[1.5]"
+                        placeholder="e.g. fish, four cans of beer. remove the apples"
+                        @keydown.ctrl.enter="submitEdit"
+                        @keydown.meta.enter="submitEdit"></textarea>
+                    <div class="flex space-x-2">
+                        <button @click="submitEdit"
+                            :disabled="isEditLoading || !editText.trim()"
+                            class="hover:opacity-75 cursor-pointer bg-rose-200 px-3 py-1 font-light rounded text-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                            {{ isEditLoading ? 'Updating...' : 'Update list' }}
+                        </button>
+                        <button @click="cancelEdit"
+                            :disabled="isEditLoading"
+                            class="hover:opacity-75 cursor-pointer bg-slate-100 px-3 py-1 font-light rounded text-lg">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Changes summary (shown after edit) -->
+                <div v-if="showChanges && lastChanges" class="no-print mb-4 p-3 bg-emerald-50 text-emerald-800 rounded-lg text-sm">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <div v-if="lastChanges.added.length" class="mb-1">
+                                <span class="font-medium">Added:</span> {{ lastChanges.added.join(', ') }}
+                            </div>
+                            <div v-if="lastChanges.removed.length" class="mb-1">
+                                <span class="font-medium">Removed:</span> {{ lastChanges.removed.join(', ') }}
+                            </div>
+                            <div v-if="!lastChanges.added.length && !lastChanges.removed.length">
+                                No changes made
+                            </div>
+                        </div>
+                        <button @click="dismissChanges" class="text-emerald-600 hover:text-emerald-800 ml-2">
+                            ✕
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Error message -->
+                <div v-if="errorMessage && isViewMode" class="no-print mb-4 p-2 bg-rose-100 text-rose-600 rounded text-sm">
+                    {{ errorMessage }}
+                </div>
+
                 <!-- Action buttons -->
                 <div class="flex space-x-2 mt-4 no-print">
                     <a :href="'/' + listId + '.pdf'" target="_blank"
                         class="hover:opacity-75 cursor-pointer bg-slate-100 px-2 py-1 font-light rounded text-lg text-slate-700 no-underline">
                         Print
                     </a>
+                    <button @click="startEdit" v-if="!isEditing"
+                        class="hover:opacity-75 cursor-pointer bg-rose-100 px-2 py-1 font-light rounded text-lg">
+                        Edit
+                    </button>
                     <button @click="shareList"
                         class="hover:opacity-75 cursor-pointer bg-green-100 px-2 py-1 font-light rounded text-lg">
                         Share
@@ -358,6 +428,18 @@
                 errorMessage: '',
                 selectedItemId: null,
 
+                // Edit mode state
+                isEditing: false,
+                editText: '',
+                isEditLoading: false,
+                lastChanges: null,  // {added: [], removed: [], kept: []}
+                showChanges: false,
+
+                // Polling state
+                listUpdatedAt: null,
+                hasRemoteUpdate: false,
+                pollInterval: null,
+
                 // List data
                 listId: null,
                 supermarket: null,
@@ -415,6 +497,14 @@
                 },
                 figureImage() {
                     return this.selectedItemPosition > 3 ? '/paris-figure-down.jpg' : '/paris-figure.jpg';
+                },
+                addedItemNames() {
+                    if (!this.lastChanges || !this.showChanges) return new Set();
+                    return new Set(this.lastChanges.added.map(n => n.toLowerCase()));
+                },
+                removedItemNames() {
+                    if (!this.lastChanges || !this.showChanges) return [];
+                    return this.lastChanges.removed;
                 }
             },
             methods: {
@@ -474,7 +564,9 @@
                     this.supermarketDisplay = data.supermarket_display;
                     this.groups = data.groups;
                     this.meta = data.meta || null;
+                    this.listUpdatedAt = data.updated_at || null;
                     this.isViewMode = true;
+                    this.hasRemoteUpdate = false;
 
                     // Select first unchecked item
                     for (const group of this.groups) {
@@ -487,6 +579,9 @@
 
                     // Update URL
                     window.history.pushState({}, '', `/${data.list_id}`);
+
+                    // Start polling for remote updates
+                    this.startPolling();
                 },
 
                 async loadList(listId) {
@@ -583,6 +678,7 @@
                 },
 
                 newList() {
+                    this.stopPolling();
                     this.isViewMode = false;
                     this.listId = null;
                     this.groups = [];
@@ -593,6 +689,12 @@
                     this.selectedSupermarket = '';
                     this.errorMessage = '';
                     this.selectedItemId = null;
+                    this.isEditing = false;
+                    this.editText = '';
+                    this.lastChanges = null;
+                    this.showChanges = false;
+                    this.listUpdatedAt = null;
+                    this.hasRemoteUpdate = false;
                     window.history.pushState({}, '', '/');
                 },
 
@@ -612,8 +714,121 @@
                         if (this.showHelp) {
                             this.showHelp = false;
                         }
+                        if (this.isEditing) {
+                            this.cancelEdit();
+                        }
                         return;
                     }
+                },
+
+                // Edit mode methods
+                startEdit() {
+                    this.isEditing = true;
+                    this.editText = '';
+                    this.lastChanges = null;
+                    this.showChanges = false;
+                    this.$nextTick(() => {
+                        const textarea = this.$refs.editTextarea;
+                        if (textarea) textarea.focus();
+                    });
+                },
+
+                cancelEdit() {
+                    this.isEditing = false;
+                    this.editText = '';
+                    this.errorMessage = '';
+                },
+
+                async submitEdit() {
+                    if (!this.editText.trim()) return;
+
+                    this.errorMessage = '';
+                    this.isEditLoading = true;
+
+                    try {
+                        const response = await fetch(`/api/list/${this.listId}/edit`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ text: this.editText })
+                        });
+
+                        if (!response.ok) {
+                            const error = await response.json();
+                            throw new Error(error.detail || 'Failed to edit list');
+                        }
+
+                        const data = await response.json();
+
+                        // Update the list
+                        this.groups = data.groups;
+                        this.meta = data.meta || null;
+                        this.listUpdatedAt = data.updated_at;
+
+                        // Store changes for highlighting
+                        this.lastChanges = data.changes;
+                        this.showChanges = true;
+
+                        // Clear edit mode
+                        this.isEditing = false;
+                        this.editText = '';
+
+                        // Auto-hide changes after 10 seconds
+                        setTimeout(() => {
+                            this.showChanges = false;
+                        }, 10000);
+
+                    } catch (error) {
+                        console.error('Edit error:', error);
+                        this.errorMessage = error.message || 'Failed to update list';
+                    } finally {
+                        this.isEditLoading = false;
+                    }
+                },
+
+                isItemAdded(itemName) {
+                    return this.addedItemNames.has(itemName.toLowerCase());
+                },
+
+                dismissChanges() {
+                    this.showChanges = false;
+                    this.lastChanges = null;
+                },
+
+                // Polling methods
+                startPolling() {
+                    if (this.pollInterval) return;
+
+                    this.pollInterval = setInterval(async () => {
+                        await this.checkForUpdates();
+                    }, 60000); // Poll every 60 seconds
+                },
+
+                stopPolling() {
+                    if (this.pollInterval) {
+                        clearInterval(this.pollInterval);
+                        this.pollInterval = null;
+                    }
+                },
+
+                async checkForUpdates() {
+                    if (!this.listId) return;
+
+                    try {
+                        const response = await fetch(`/api/list/${this.listId}/version`);
+                        if (!response.ok) return;
+
+                        const data = await response.json();
+                        if (data.updated_at && this.listUpdatedAt && data.updated_at !== this.listUpdatedAt) {
+                            this.hasRemoteUpdate = true;
+                        }
+                    } catch (error) {
+                        console.error('Polling error:', error);
+                    }
+                },
+
+                async refreshList() {
+                    this.hasRemoteUpdate = false;
+                    await this.loadList(this.listId);
                 }
             },
             mounted() {
@@ -644,6 +859,7 @@
             },
             destroyed() {
                 window.removeEventListener('keydown', this.handleKeyboard);
+                this.stopPolling();
             }
         });
 
