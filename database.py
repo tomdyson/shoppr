@@ -43,11 +43,11 @@ def init_db():
         )
         ''')
 
-        # Add updated_at column if it doesn't exist (migration for existing DBs)
-        try:
+        # Ensure updated_at column exists (migration for existing DBs)
+        cursor = conn.execute('PRAGMA table_info(shopping_lists)')
+        columns = {row[1] for row in cursor.fetchall()}
+        if 'updated_at' not in columns:
             conn.execute('ALTER TABLE shopping_lists ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
-        except sqlite3.OperationalError:
-            pass  # Column already exists
 
         conn.execute('''
         CREATE TABLE IF NOT EXISTS shopping_items (
