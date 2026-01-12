@@ -362,13 +362,27 @@ EDIT INSTRUCTIONS:
     cleaned_response = strip_markdown_code_blocks(raw_response)
     result = json.loads(cleaned_response)
 
-    items = result.get("items", [])
-    changes = {
-        "added": result.get("added", []),
-        "removed": result.get("removed", []),
-        "kept": result.get("kept", [])
-    }
+    # Validate structure of LLM JSON response
+    if not isinstance(result, dict):
+        raise ValueError("LLM edit response must be a JSON object")
 
+    if "items" not in result:
+        raise ValueError("LLM edit response is missing required 'items' field")
+
+    items = result["items"]
+    if not isinstance(items, list):
+        raise ValueError("LLM edit response field 'items' must be a list")
+
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise ValueError(f"LLM edit response 'items[{index}]' must be a JSON object")
+
+    changes: Dict[str, List[Any]] = {}
+    for key in ("added", "removed", "kept"):
+        value = result.get(key, [])
+        if not isinstance(value, list):
+            raise ValueError(f"LLM edit response field '{key}' must be a list")
+        changes[key] = value
     return items, changes, usage_stats
 
 
