@@ -343,7 +343,7 @@
                 </div>
 
                 <!-- LLM Token Usage Footer (Debug) -->
-                <div v-if="meta" class="mt-6 no-print" style="font-size: 11px; color: #94a3b8;">
+                <div v-if="meta && (meta.ocr || meta.planning)" class="mt-6 no-print" style="font-size: 11px; color: #94a3b8;">
                     <button @click="showDebug = !showDebug" class="hover:underline">
                         {{ showDebug ? 'Hide' : 'Show' }} debug info
                     </button>
