@@ -72,10 +72,25 @@ A mobile-first shopping list app using FastAPI + Vue.js + LiteLLM proxy for AI-p
 - 5-character URL slugs for list sharing
 - Automatic cleanup after 28 days (via `cleanup.py`)
 
+## Development Setup
+
+**IMPORTANT**: Always use the virtual environment when running locally or testing:
+
+```bash
+# Activate the virtual environment
+source .venv/bin/activate
+
+# Verify you're in the venv (should show .venv in path)
+which python
+```
+
+All local development and testing commands should be run within the activated virtual environment.
+
 ## Testing Before Deploy
 
 ```bash
-# Local testing
+# Local testing (remember to activate .venv first!)
+source .venv/bin/activate
 uvicorn main:app --reload
 
 # Docker testing
@@ -115,5 +130,14 @@ npm run watch:css
 
 ## Repository
 - Main branch: `main`
-- Deployment: Automatic on push to `main`
 - Remote: https://github.com/tomdyson/shoppr.git
+
+## Deployment
+
+**IMPORTANT**: Pushing to `main` automatically deploys to production via Coolify.
+
+- **Production URL**: https://shop.tomd.org
+- **Platform**: Coolify
+- **Trigger**: Automatic on push to `main` branch
+
+Before pushing to main, ensure you've completed the [Deployment Checklist](#deployment-checklist) above.
