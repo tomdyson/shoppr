@@ -5,6 +5,7 @@ import re
 import time
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from litellm_client import LiteLLMClient
 from fastapi import FastAPI, HTTPException, Response, Request
@@ -23,7 +24,17 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env", override=True)
 
 # Initialize FastAPI app
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Initialize the database
+    time.sleep(2)  # Allow volume mounting in Docker
+    print(f"Starting application with database path: {os.getenv('DB_PATH', 'shopping.db')}")
+    database.init_db()
+    yield
+    # Shutdown: Cleanup if needed
+    # Add any shutdown logic here if required
+
+app = FastAPI(lifespan=lifespan)
 
 # Add CORS middleware
 app.add_middleware(
@@ -364,14 +375,6 @@ EDIT INSTRUCTIONS:
             raise ValueError(f"LLM edit response field '{key}' must be a list")
         changes[key] = value
     return items, changes, usage_stats
-
-
-# Initialize the database when the app starts
-@app.on_event("startup")
-async def startup_event():
-    time.sleep(2)  # Allow volume mounting in Docker
-    print(f"Starting application with database path: {os.getenv('DB_PATH', 'shopping.db')}")
-    database.init_db()
 
 
 # Serve index.html at root
