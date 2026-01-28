@@ -243,6 +243,9 @@ pytest test_main.py -v
 
 # Run specific test
 pytest test_main.py::test_api_process_text -v
+
+# Run advanced tests (PDF, error handling, etc.)
+LITELLM_API_KEY=test pytest test_advanced.py -v
 ```
 
 The test suite (`test_main.py`) covers:
@@ -250,6 +253,11 @@ The test suite (`test_main.py`) covers:
 - API endpoints (text/image processing, list retrieval and editing)
 - Input validation and error handling
 - Slug generation and validation
+
+The new `test_advanced.py` suite covers:
+- PDF generation
+- LLM error handling and edge cases
+- Utilities and helper functions
 
 All tests use mocked LLM calls to avoid API costs during testing.
 

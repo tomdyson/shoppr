@@ -97,7 +97,7 @@ Always run the test suite before deploying changes:
 source .venv/bin/activate
 
 # Run all tests
-pytest test_main.py -v
+LITELLM_API_KEY=test pytest test_main.py test_advanced.py -v
 
 # Run specific test
 pytest test_main.py::test_api_process_text -v
@@ -111,6 +111,11 @@ The test suite (`test_main.py`) includes 10 critical tests covering:
 - API endpoints (process text/image, get/edit lists, update items)
 - Validation (slug format, supermarket validation)
 - Error handling (invalid inputs, 404s, etc.)
+
+The `test_advanced.py` suite adds coverage for:
+- PDF generation
+- LLM failure modes
+- Edge cases
 
 All LLM calls are mocked, so tests run without API costs.
 
