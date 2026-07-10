@@ -1,16 +1,18 @@
 import base64
+import asyncio
 import json
 import os
 import re
 import time
+from collections import defaultdict
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Set
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from litellm_client import LiteLLMClient
 from fastapi import FastAPI, HTTPException, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from weasyprint import HTML
@@ -128,6 +130,7 @@ class ShoppingListResponse(BaseModel):
     supermarket: Optional[str]
     supermarket_display: Optional[str]
     groups: List[ItemGroup]
+    revision: int = 0
     updated_at: Optional[str] = None
     meta: Optional[Dict[str, Any]] = None
 
@@ -146,12 +149,57 @@ class EditListResponse(BaseModel):
     supermarket_display: Optional[str]
     groups: List[ItemGroup]
     changes: Dict[str, List[str]]  # {added: [], removed: [], kept: []}
+    revision: int = 0
     updated_at: Optional[str] = None
     meta: Optional[Dict[str, Any]] = None
 
 
 class ListVersionResponse(BaseModel):
     updated_at: Optional[str]
+    revision: int
+
+
+class ItemUpdateResponse(BaseModel):
+    success: bool
+    revision: int
+
+
+class ListEventBroker:
+    """Fan out list-change events to connected clients in this process."""
+
+    def __init__(self, queue_size: int = 100):
+        self.queue_size = queue_size
+        self.subscribers: Dict[str, Set[asyncio.Queue]] = defaultdict(set)
+
+    def subscribe(self, list_id: str) -> asyncio.Queue:
+        queue = asyncio.Queue(maxsize=self.queue_size)
+        self.subscribers[list_id].add(queue)
+        return queue
+
+    def unsubscribe(self, list_id: str, queue: asyncio.Queue) -> None:
+        subscribers = self.subscribers.get(list_id)
+        if not subscribers:
+            return
+        subscribers.discard(queue)
+        if not subscribers:
+            self.subscribers.pop(list_id, None)
+
+    def publish(self, list_id: str, event: Dict[str, Any]) -> None:
+        for queue in list(self.subscribers.get(list_id, ())):
+            if queue.full():
+                # A slow client only needs the newest revision: it will reload
+                # when it observes a gap in the monotonic revision sequence.
+                while not queue.empty():
+                    queue.get_nowait()
+            queue.put_nowait(event)
+
+
+list_event_broker = ListEventBroker()
+
+
+def format_sse_event(event: Dict[str, Any]) -> str:
+    """Serialize a list event using the Server-Sent Events wire format."""
+    return f"event: list-change\ndata: {json.dumps(event, separators=(',', ':'))}\n\n"
 
 
 def strip_markdown_code_blocks(text: str) -> str:
@@ -513,29 +561,77 @@ async def get_list(list_id: str):
     return format_list_response(list_data)
 
 
-@app.put("/api/list/{list_id}/item/{item_id}")
+@app.put("/api/list/{list_id}/item/{item_id}", response_model=ItemUpdateResponse)
 async def update_item(list_id: str, item_id: int, request: UpdateItemRequest):
     """Update the checked status of an item."""
     if not is_valid_slug(list_id):
         raise HTTPException(status_code=400, detail="Invalid list ID format")
 
-    if not database.update_item_status(list_id, item_id, request.checked):
+    revision = database.update_item_status(list_id, item_id, request.checked)
+    if revision is None:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    return {"success": True}
+    list_event_broker.publish(list_id, {
+        "type": "item.updated",
+        "revision": revision,
+        "item_id": item_id,
+        "checked": request.checked,
+    })
+    return ItemUpdateResponse(success=True, revision=revision)
 
 
 @app.get("/api/list/{list_id}/version", response_model=ListVersionResponse)
 async def get_list_version(list_id: str):
-    """Get the current version (updated_at) of a list for polling."""
+    """Get the current timestamp and monotonic revision of a list."""
     if not is_valid_slug(list_id):
         raise HTTPException(status_code=400, detail="Invalid list ID format")
 
     updated_at = database.get_list_version(list_id)
-    if updated_at is None:
+    revision = database.get_list_revision(list_id)
+    if updated_at is None or revision is None:
         raise HTTPException(status_code=404, detail="List not found")
 
-    return ListVersionResponse(updated_at=updated_at)
+    return ListVersionResponse(updated_at=updated_at, revision=revision)
+
+
+@app.get("/api/list/{list_id}/events")
+async def stream_list_events(list_id: str):
+    """Stream revisioned changes for one shopping list."""
+    if not is_valid_slug(list_id):
+        raise HTTPException(status_code=400, detail="Invalid list ID format")
+
+    if database.get_list_revision(list_id) is None:
+        raise HTTPException(status_code=404, detail="List not found")
+
+    async def event_stream():
+        queue = list_event_broker.subscribe(list_id)
+        try:
+            # Subscribe before reading the revision so an update cannot fall
+            # into the gap between the initial snapshot and the live stream.
+            revision = database.get_list_revision(list_id)
+            if revision is None:
+                return
+            yield format_sse_event({"type": "connected", "revision": revision})
+
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15)
+                    yield format_sse_event(event)
+                except asyncio.TimeoutError:
+                    # Keep proxies and mobile networks from closing an idle stream.
+                    yield ": keepalive\n\n"
+        finally:
+            list_event_broker.unsubscribe(list_id, queue)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/api/list/{list_id}/edit", response_model=EditListResponse)
@@ -575,7 +671,8 @@ async def edit_list(list_id: str, request: EditListRequest):
                 raise HTTPException(status_code=500, detail="Invalid item format from LLM")
 
         # Update the database
-        if not database.update_shopping_list(list_id, new_items, changes):
+        revision = database.update_shopping_list(list_id, new_items, changes)
+        if revision is None:
             raise HTTPException(status_code=500, detail="Failed to update list")
 
         # Get the updated list
@@ -595,15 +692,21 @@ async def edit_list(list_id: str, request: EditListRequest):
         if updated_list['supermarket']:
             supermarket_display = SUPERMARKETS.get(updated_list['supermarket'])
 
-        return EditListResponse(
+        response = EditListResponse(
             list_id=list_id,
             supermarket=updated_list['supermarket'],
             supermarket_display=supermarket_display,
             groups=groups,
             changes=changes,
+            revision=revision,
             updated_at=updated_list.get('updated_at'),
             meta={"edit": edit_usage}
         )
+        list_event_broker.publish(list_id, {
+            "type": "list.replaced",
+            "revision": revision,
+        })
+        return response
 
     except HTTPException:
         raise
@@ -798,6 +901,7 @@ def format_list_response(list_data: dict) -> ShoppingListResponse:
         supermarket=list_data['supermarket'],
         supermarket_display=supermarket_display,
         groups=groups,
+        revision=list_data.get('revision', 0),
         updated_at=list_data.get('updated_at'),
         meta=None  # Explicitly set meta to None by default
     )

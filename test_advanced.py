@@ -6,6 +6,7 @@ Covers PDF generation, error handling, and edge cases.
 
 import json
 import os
+import sqlite3
 import tempfile
 from unittest.mock import Mock, patch, MagicMock
 
@@ -14,7 +15,7 @@ from fastapi.testclient import TestClient
 
 import database
 import main
-from main import app, strip_markdown_code_blocks
+from main import ListEventBroker, app, format_sse_event, strip_markdown_code_blocks
 
 
 @pytest.fixture
@@ -170,37 +171,87 @@ def test_ocr_failure(client, temp_db):
         assert "Could not extract any text" in response.json()["detail"]
 
 
-# --- Versioning/Polling Tests ---
+# --- Versioning/Realtime Tests ---
 
 def test_list_versioning(client, temp_db, mock_list_data):
-    """Test that list version changes on update."""
+    """Test that every update gets a unique monotonic revision."""
     list_id = database.create_shopping_list(mock_list_data, "tesco")
-    
-    # Get initial version
+
     response = client.get(f"/api/list/{list_id}/version")
     assert response.status_code == 200
-    v1 = response.json().get("updated_at")
-    assert v1 is not None
+    assert response.json()["revision"] == 0
 
-    # Update item
     list_data = database.get_shopping_list(list_id)
     item_id = list_data['groups'][0]['items'][0]['id']
-    
-    # Wait a tiny bit to ensure timestamp difference if resolution is low? 
-    # Usually sqlite current_timestamp is second resolution.
-    import time
-    time.sleep(1.1) 
 
-    database.update_item_status(list_id, item_id, True)
+    # Two same-second updates must still produce distinct versions.
+    assert database.update_item_status(list_id, item_id, True) == 1
+    assert database.update_item_status(list_id, item_id, False) == 2
 
-    # Get v2
     response = client.get(f"/api/list/{list_id}/version")
-    v2 = response.json().get("updated_at")
+    assert response.json()["revision"] == 2
 
-    assert v1 != v2
+
+def test_init_db_adds_revision_to_existing_database(temp_db):
+    """Test migration of databases created before realtime revisions."""
+    with sqlite3.connect(temp_db) as conn:
+        conn.execute("DROP TABLE shopping_items")
+        conn.execute("DROP TABLE shopping_lists")
+        conn.execute('''
+            CREATE TABLE shopping_lists (
+                id TEXT PRIMARY KEY,
+                supermarket TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute(
+            "INSERT INTO shopping_lists (id, supermarket) VALUES ('abc12', 'tesco')"
+        )
+
+    database.init_db()
+
+    with sqlite3.connect(temp_db) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(shopping_lists)")}
+        revision = conn.execute(
+            "SELECT revision FROM shopping_lists WHERE id = 'abc12'"
+        ).fetchone()[0]
+
+    assert "revision" in columns
+    assert revision == 0
+
+
+def test_list_event_broker_fans_out_and_collapses_backlog():
+    """Test list-scoped event fan-out and slow-client catch-up behavior."""
+    broker = ListEventBroker(queue_size=1)
+    first = broker.subscribe("abc12")
+    second = broker.subscribe("abc12")
+    unrelated = broker.subscribe("other")
+
+    broker.publish("abc12", {"type": "item.updated", "revision": 1})
+    broker.publish("abc12", {"type": "item.updated", "revision": 2})
+
+    assert first.get_nowait()["revision"] == 2
+    assert second.get_nowait()["revision"] == 2
+    assert unrelated.empty()
+
+    broker.unsubscribe("abc12", first)
+    broker.unsubscribe("abc12", second)
+    assert "abc12" not in broker.subscribers
+
+
+def test_sse_event_format():
+    event = {"type": "item.updated", "revision": 3, "checked": True}
+    message = format_sse_event(event)
+
+    assert message.startswith("event: list-change\n")
+    assert 'data: {"type":"item.updated","revision":3,"checked":true}\n\n' in message
 
 
 def test_version_not_found(client, temp_db):
     """Test version endpoint for missing list."""
     response = client.get("/api/list/abcde/version")
+    assert response.status_code == 404
+
+    response = client.get("/api/list/abcde/events")
     assert response.status_code == 404

@@ -275,16 +275,6 @@
                     All done! Shopping complete.
                 </div>
 
-                <!-- Remote update notification -->
-                <div v-if="hasRemoteUpdate"
-                    class="no-print mb-4 p-3 bg-amber-100 text-amber-800 rounded-lg flex items-center justify-between">
-                    <span>This list has been updated elsewhere.</span>
-                    <button @click="refreshList"
-                        class="px-3 py-1 bg-amber-200 hover:bg-amber-300 rounded font-medium">
-                        Refresh
-                    </button>
-                </div>
-
                 <!-- Edit textarea (shown when editing) -->
                 <div v-if="isEditing" class="no-print mb-4">
                     <textarea ref="editTextarea" v-model="editText" rows="3"
@@ -438,10 +428,11 @@
                 lastChanges: null,  // {added: [], removed: [], kept: []}
                 showChanges: false,
 
-                // Polling state
-                listUpdatedAt: null,
-                hasRemoteUpdate: false,
-                pollInterval: null,
+                // Realtime synchronization state
+                listRevision: 0,
+                eventSource: null,
+                isRefreshing: false,
+                refreshQueued: false,
 
                 // List data
                 listId: null,
@@ -561,15 +552,15 @@
                     }
                 },
 
-                showList(data) {
+                showList(data, updateUrl = true) {
+                    this.disconnectFromListEvents();
                     this.listId = data.list_id;
                     this.supermarket = data.supermarket;
                     this.supermarketDisplay = data.supermarket_display;
                     this.groups = data.groups;
                     this.meta = data.meta || null;
-                    this.listUpdatedAt = data.updated_at || null;
+                    this.listRevision = data.revision || 0;
                     this.isViewMode = true;
-                    this.hasRemoteUpdate = false;
 
                     // Select first unchecked item
                     for (const group of this.groups) {
@@ -581,40 +572,59 @@
                     }
 
                     // Update URL
-                    window.history.pushState({}, '', `/${data.list_id}`);
+                    if (updateUrl && window.location.pathname !== `/${data.list_id}`) {
+                        window.history.pushState({}, '', `/${data.list_id}`);
+                    }
 
-                    // Start polling for remote updates
-                    this.startPolling();
+                    this.connectToListEvents();
                 },
 
-                async loadList(listId) {
+                async loadList(listId, updateUrl = false) {
                     try {
                         const response = await fetch(`/api/list/${listId}`);
                         if (!response.ok) {
                             throw new Error('List not found');
                         }
                         const data = await response.json();
-                        this.showList(data);
+                        this.showList(data, updateUrl);
+                        return true;
                     } catch (error) {
                         console.error('Error loading list:', error);
+                        this.disconnectFromListEvents();
                         // Redirect to home if list not found
                         window.history.pushState({}, '', '/');
+                        return false;
                     }
                 },
 
                 async toggleItem(item) {
-                    item.checked = !item.checked;
+                    const previousChecked = item.checked;
+                    const requestedChecked = !item.checked;
+                    item.checked = requestedChecked;
 
                     try {
-                        await fetch(`/api/list/${this.listId}/item/${item.id}`, {
+                        const response = await fetch(`/api/list/${this.listId}/item/${item.id}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ checked: item.checked })
+                            body: JSON.stringify({ checked: requestedChecked })
                         });
+                        if (!response.ok) {
+                            throw new Error('Failed to update item');
+                        }
+                        const data = await response.json();
+                        const revision = data.revision || 0;
+                        if (revision > this.listRevision) {
+                            // Whichever request committed at the newest revision
+                            // is canonical, even when rapid toggles return out of order.
+                            item.checked = requestedChecked;
+                            this.listRevision = revision;
+                        }
                     } catch (error) {
                         // Revert on failure
-                        item.checked = !item.checked;
+                        item.checked = previousChecked;
                         console.error('Error updating item:', error);
+                        this.errorMessage = 'Could not update the item. The list has been refreshed.';
+                        await this.refreshList();
                     }
                 },
 
@@ -681,7 +691,7 @@
                 },
 
                 newList() {
-                    this.stopPolling();
+                    this.disconnectFromListEvents();
                     this.isViewMode = false;
                     this.listId = null;
                     this.groups = [];
@@ -696,8 +706,7 @@
                     this.editText = '';
                     this.lastChanges = null;
                     this.showChanges = false;
-                    this.listUpdatedAt = null;
-                    this.hasRemoteUpdate = false;
+                    this.listRevision = 0;
                     window.history.pushState({}, '', '/');
                 },
 
@@ -765,7 +774,7 @@
                         // Update the list
                         this.groups = data.groups;
                         this.meta = data.meta || null;
-                        this.listUpdatedAt = data.updated_at;
+                        this.listRevision = Math.max(this.listRevision, data.revision || 0);
 
                         // Store changes for highlighting
                         this.lastChanges = data.changes;
@@ -774,6 +783,10 @@
                         // Clear edit mode
                         this.isEditing = false;
                         this.editText = '';
+
+                        // The edit response describes this mutation, while a
+                        // fresh read also includes any concurrent changes.
+                        await this.refreshList();
 
                         // Auto-hide changes after 10 seconds
                         setTimeout(() => {
@@ -799,41 +812,82 @@
                     this.errorMessage = '';
                 },
 
-                // Polling methods
-                startPolling() {
-                    if (this.pollInterval) return;
+                connectToListEvents() {
+                    if (!this.listId || typeof EventSource === 'undefined') return;
 
-                    this.pollInterval = setInterval(async () => {
-                        await this.checkForUpdates();
-                    }, 60000); // Poll every 60 seconds
+                    const source = new EventSource(`/api/list/${this.listId}/events`);
+                    source.addEventListener('list-change', (event) => this.handleListEvent(event));
+                    source.onerror = () => {
+                        // EventSource reconnects automatically. The connected
+                        // event carries a revision so missed changes are caught up.
+                        console.debug('List event stream disconnected; reconnecting');
+                    };
+                    this.eventSource = source;
                 },
 
-                stopPolling() {
-                    if (this.pollInterval) {
-                        clearInterval(this.pollInterval);
-                        this.pollInterval = null;
+                disconnectFromListEvents() {
+                    if (this.eventSource) {
+                        this.eventSource.close();
+                        this.eventSource = null;
                     }
                 },
 
-                async checkForUpdates() {
-                    if (!this.listId) return;
-
+                handleListEvent(message) {
+                    let event;
                     try {
-                        const response = await fetch(`/api/list/${this.listId}/version`);
-                        if (!response.ok) return;
-
-                        const data = await response.json();
-                        if (data.updated_at && this.listUpdatedAt && data.updated_at !== this.listUpdatedAt) {
-                            this.hasRemoteUpdate = true;
-                        }
+                        event = JSON.parse(message.data);
                     } catch (error) {
-                        console.error('Polling error:', error);
+                        console.error('Invalid list event:', error);
+                        return;
                     }
+
+                    const revision = Number(event.revision);
+                    if (!Number.isInteger(revision)) return;
+
+                    if (event.type === 'connected') {
+                        if (revision !== this.listRevision) this.refreshList();
+                        return;
+                    }
+
+                    if (revision <= this.listRevision) return;
+                    if (revision !== this.listRevision + 1) {
+                        this.refreshList();
+                        return;
+                    }
+
+                    if (event.type === 'item.updated') {
+                        const item = this.groups
+                            .flatMap(group => group.items)
+                            .find(candidate => candidate.id === event.item_id);
+                        if (!item) {
+                            this.refreshList();
+                            return;
+                        }
+                        item.checked = event.checked;
+                        this.listRevision = revision;
+                        return;
+                    }
+
+                    // Structural changes replace item IDs, so load the complete
+                    // canonical state. Future add/remove events can be applied here.
+                    this.refreshList();
                 },
 
                 async refreshList() {
-                    this.hasRemoteUpdate = false;
-                    await this.loadList(this.listId);
+                    if (!this.listId) return;
+                    if (this.isRefreshing) {
+                        this.refreshQueued = true;
+                        return;
+                    }
+                    this.isRefreshing = true;
+                    try {
+                        do {
+                            this.refreshQueued = false;
+                            await this.loadList(this.listId, false);
+                        } while (this.refreshQueued && this.listId);
+                    } finally {
+                        this.isRefreshing = false;
+                    }
                 }
             },
             mounted() {
@@ -864,7 +918,7 @@
             },
             destroyed() {
                 window.removeEventListener('keydown', this.handleKeyboard);
-                this.stopPolling();
+                this.disconnectFromListEvents();
             }
         });
 

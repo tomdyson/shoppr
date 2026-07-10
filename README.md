@@ -10,6 +10,7 @@ A mobile-first web app that turns messy shopping lists into organized, store-opt
 - **Store-specific ordering**: Orders items by typical supermarket layout for 8 UK stores
 - **Touch-friendly UI**: Mobile-first design with large tap targets and sticky headers
 - **Shareable lists**: Short 5-character URLs for easy sharing (e.g., `/a3x9k`)
+- **Realtime collaboration**: Checked items and list edits synchronize across connected devices
 - **Progress tracking**: Visual progress bar and item counts
 - **PWA support**: Install on your phone, works offline for saved lists
 - **No account required**: Just create and share lists
@@ -174,11 +175,25 @@ Content-Type: application/json
 }
 ```
 
+The response includes the list's new monotonic `revision`.
+
+### Realtime List Events
+
+```http
+GET /api/list/{list_id}/events
+Accept: text/event-stream
+```
+
+The stream emits revisioned `list-change` events. Clients can apply
+`item.updated` events directly and reload the list for structural events or a
+gap in the revision sequence.
+
 ### Response Format
 
 ```json
 {
   "list_id": "a3x9k",
+  "revision": 0,
   "supermarket": "tesco",
   "supermarket_display": "Tesco",
   "groups": [

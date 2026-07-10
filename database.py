@@ -39,11 +39,12 @@ def init_db():
             id TEXT PRIMARY KEY,
             supermarket TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            revision INTEGER NOT NULL DEFAULT 0
         )
         ''')
 
-        # Ensure updated_at column exists (migration for existing DBs)
+        # Ensure versioning columns exist (migration for existing DBs)
         cursor = conn.execute('PRAGMA table_info(shopping_lists)')
         columns = {row[1] for row in cursor.fetchall()}
         if 'updated_at' not in columns:
@@ -51,6 +52,10 @@ def init_db():
             conn.execute('ALTER TABLE shopping_lists ADD COLUMN updated_at TIMESTAMP')
             # Update existing rows to set the timestamp
             conn.execute('UPDATE shopping_lists SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL')
+        if 'revision' not in columns:
+            conn.execute(
+                'ALTER TABLE shopping_lists ADD COLUMN revision INTEGER NOT NULL DEFAULT 0'
+            )
 
         conn.execute('''
         CREATE TABLE IF NOT EXISTS shopping_items (
@@ -114,7 +119,7 @@ def get_shopping_list(list_id: str) -> Optional[dict]:
     with get_db() as conn:
         # Check if list exists and get supermarket
         list_row = conn.execute(
-            'SELECT id, supermarket, updated_at FROM shopping_lists WHERE id = ?',
+            'SELECT id, supermarket, updated_at, revision FROM shopping_lists WHERE id = ?',
             (list_id,)
         ).fetchone()
 
@@ -153,12 +158,13 @@ def get_shopping_list(list_id: str) -> Optional[dict]:
             'list_id': list_row['id'],
             'supermarket': list_row['supermarket'],
             'updated_at': list_row['updated_at'],
+            'revision': list_row['revision'],
             'groups': sorted_groups
         }
 
 
-def update_item_status(list_id: str, item_id: int, checked: bool) -> bool:
-    """Update the checked status of a single item."""
+def update_item_status(list_id: str, item_id: int, checked: bool) -> Optional[int]:
+    """Update an item's checked status and return the resulting list revision."""
     with get_db() as conn:
         # Verify the item belongs to the list
         item = conn.execute('''
@@ -167,19 +173,27 @@ def update_item_status(list_id: str, item_id: int, checked: bool) -> bool:
         ''', (item_id, list_id)).fetchone()
 
         if not item:
-            return False
+            return None
 
         conn.execute(
             'UPDATE shopping_items SET checked = ? WHERE id = ?',
             (checked, item_id)
         )
-        # Update the list's updated_at timestamp
+        # Increment the revision in the same transaction as the item change.
         conn.execute(
-            'UPDATE shopping_lists SET updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            '''
+            UPDATE shopping_lists
+            SET updated_at = CURRENT_TIMESTAMP, revision = revision + 1
+            WHERE id = ?
+            ''',
             (list_id,)
         )
+        revision = conn.execute(
+            'SELECT revision FROM shopping_lists WHERE id = ?',
+            (list_id,)
+        ).fetchone()['revision']
         conn.commit()
-        return True
+        return revision
 
 
 def get_list_progress(list_id: str) -> Optional[dict]:
@@ -215,7 +229,20 @@ def get_list_version(list_id: str) -> Optional[str]:
         return result['updated_at']
 
 
-def update_shopping_list(list_id: str, new_items: List[dict], changes: dict) -> bool:
+def get_list_revision(list_id: str) -> Optional[int]:
+    """Get the monotonic revision used for realtime synchronization."""
+    with get_db() as conn:
+        result = conn.execute(
+            'SELECT revision FROM shopping_lists WHERE id = ?',
+            (list_id,)
+        ).fetchone()
+
+        if not result:
+            return None
+        return result['revision']
+
+
+def update_shopping_list(list_id: str, new_items: List[dict], changes: dict) -> Optional[int]:
     """
     Update a shopping list with new items while preserving checked status.
 
@@ -225,7 +252,7 @@ def update_shopping_list(list_id: str, new_items: List[dict], changes: dict) -> 
         changes: Dict with 'kept', 'added', 'removed' item names for tracking
 
     Returns:
-        True if successful, False otherwise
+        The resulting list revision if successful, otherwise None
     """
     with get_db() as conn:
         # Verify list exists
@@ -235,7 +262,7 @@ def update_shopping_list(list_id: str, new_items: List[dict], changes: dict) -> 
         ).fetchone()
 
         if not list_row:
-            return False
+            return None
 
         # Get existing items with their checked status
         existing_items = conn.execute('''
@@ -268,11 +295,19 @@ def update_shopping_list(list_id: str, new_items: List[dict], changes: dict) -> 
                 was_checked
             ))
 
-        # Update the updated_at timestamp
+        # Increment the revision in the same transaction as the list change.
         conn.execute(
-            'UPDATE shopping_lists SET updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            '''
+            UPDATE shopping_lists
+            SET updated_at = CURRENT_TIMESTAMP, revision = revision + 1
+            WHERE id = ?
+            ''',
             (list_id,)
         )
+        revision = conn.execute(
+            'SELECT revision FROM shopping_lists WHERE id = ?',
+            (list_id,)
+        ).fetchone()['revision']
 
         conn.commit()
-        return True
+        return revision
