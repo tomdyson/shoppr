@@ -124,8 +124,8 @@ def test_database_update_item_status(temp_db, mock_llm_response):
     assert first_item['checked'] is False
 
     # Update to checked
-    success = database.update_item_status(list_id, item_id, True)
-    assert success is True
+    revision = database.update_item_status(list_id, item_id, True)
+    assert revision == 1
 
     # Verify update
     updated_list = database.get_shopping_list(list_id)
@@ -137,8 +137,8 @@ def test_database_update_item_status(temp_db, mock_llm_response):
     assert updated_item['checked'] is True
 
     # Test updating non-existent item
-    success = database.update_item_status(list_id, 99999, True)
-    assert success is False
+    revision = database.update_item_status(list_id, 99999, True)
+    assert revision is None
 
 
 # Test 3: Database - Update shopping list with edit
@@ -185,8 +185,8 @@ def test_database_update_shopping_list(temp_db, mock_llm_response):
     }
 
     # Update list
-    success = database.update_shopping_list(list_id, new_items, changes)
-    assert success is True
+    revision = database.update_shopping_list(list_id, new_items, changes)
+    assert revision == 2
 
     # Verify update
     updated_list = database.get_shopping_list(list_id)
@@ -229,6 +229,7 @@ def test_api_process_text(client, temp_db, mock_llm_response, mock_llm_usage):
         assert len(data['list_id']) == 5
         assert data['supermarket'] == 'tesco'
         assert data['supermarket_display'] == 'Tesco'
+        assert data['revision'] == 0
         assert 'groups' in data
         assert len(data['groups']) == 3
 
@@ -338,6 +339,7 @@ def test_api_edit_list(client, temp_db, mock_llm_response, mock_llm_usage):
         # Verify metadata
         assert 'meta' in data
         assert 'edit' in data['meta']
+        assert data['revision'] == 1
 
 
 # Test 7: API - Get list endpoint
@@ -369,15 +371,27 @@ def test_api_update_item(client, temp_db, mock_llm_response):
     list_id = database.create_shopping_list(mock_llm_response, "tesco")
     list_data = database.get_shopping_list(list_id)
     item_id = list_data['groups'][0]['items'][0]['id']
+    event_queue = main.list_event_broker.subscribe(list_id)
 
     # Check the item
-    response = client.put(
-        f"/api/list/{list_id}/item/{item_id}",
-        json={"checked": True}
-    )
+    try:
+        response = client.put(
+            f"/api/list/{list_id}/item/{item_id}",
+            json={"checked": True}
+        )
+        event = event_queue.get_nowait()
+    finally:
+        main.list_event_broker.unsubscribe(list_id, event_queue)
 
     assert response.status_code == 200
     assert response.json()['success'] is True
+    assert response.json()['revision'] == 1
+    assert event == {
+        "type": "item.updated",
+        "revision": 1,
+        "item_id": item_id,
+        "checked": True,
+    }
 
     # Verify it was updated
     list_data = database.get_shopping_list(list_id)
