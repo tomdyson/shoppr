@@ -432,6 +432,7 @@
                 listRevision: 0,
                 eventSource: null,
                 isRefreshing: false,
+                refreshQueued: false,
 
                 // List data
                 listId: null,
@@ -589,6 +590,7 @@
                         return true;
                     } catch (error) {
                         console.error('Error loading list:', error);
+                        this.disconnectFromListEvents();
                         // Redirect to home if list not found
                         window.history.pushState({}, '', '/');
                         return false;
@@ -872,10 +874,17 @@
                 },
 
                 async refreshList() {
-                    if (!this.listId || this.isRefreshing) return;
+                    if (!this.listId) return;
+                    if (this.isRefreshing) {
+                        this.refreshQueued = true;
+                        return;
+                    }
                     this.isRefreshing = true;
                     try {
-                        await this.loadList(this.listId, false);
+                        do {
+                            this.refreshQueued = false;
+                            await this.loadList(this.listId, false);
+                        } while (this.refreshQueued && this.listId);
                     } finally {
                         this.isRefreshing = false;
                     }
