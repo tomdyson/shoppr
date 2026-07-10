@@ -433,6 +433,8 @@
                 eventSource: null,
                 isRefreshing: false,
                 refreshQueued: false,
+                syncClientId: Math.random().toString(36).slice(2, 7),
+                syncDebug: new URLSearchParams(window.location.search).get('debug-sync') === '1',
 
                 // List data
                 listId: null,
@@ -502,6 +504,15 @@
                 }
             },
             methods: {
+                syncLog(message, details = {}) {
+                    if (!this.syncDebug) return;
+                    console.info(`[shoppr-sync ${this.syncClientId}] ${message}`, {
+                        listId: this.listId,
+                        localRevision: this.listRevision,
+                        ...details
+                    });
+                },
+
                 formatCost(val) {
                     if (val === undefined || val === null) return '0.00000';
                     return val.toFixed(5);
@@ -561,6 +572,10 @@
                     this.meta = data.meta || null;
                     this.listRevision = data.revision || 0;
                     this.isViewMode = true;
+                    this.syncLog('snapshot applied', {
+                        snapshotRevision: data.revision,
+                        itemCount: data.groups.reduce((count, group) => count + group.items.length, 0)
+                    });
 
                     // Select first unchecked item
                     for (const group of this.groups) {
@@ -581,11 +596,16 @@
 
                 async loadList(listId, updateUrl = false) {
                     try {
+                        this.syncLog('snapshot requested', { requestedListId: listId });
                         const response = await fetch(`/api/list/${listId}`);
                         if (!response.ok) {
                             throw new Error('List not found');
                         }
                         const data = await response.json();
+                        this.syncLog('snapshot received', {
+                            requestedListId: listId,
+                            snapshotRevision: data.revision
+                        });
                         this.showList(data, updateUrl);
                         return true;
                     } catch (error) {
@@ -601,6 +621,10 @@
                     const previousChecked = item.checked;
                     const requestedChecked = !item.checked;
                     item.checked = requestedChecked;
+                    this.syncLog('mutation requested', {
+                        itemId: item.id,
+                        checked: requestedChecked
+                    });
 
                     try {
                         const response = await fetch(`/api/list/${this.listId}/item/${item.id}`, {
@@ -612,12 +636,36 @@
                             throw new Error('Failed to update item');
                         }
                         const data = await response.json();
-                        const revision = data.revision || 0;
-                        if (revision > this.listRevision) {
+                        const revision = Number(data.revision);
+                        this.syncLog('mutation response received', {
+                            itemId: item.id,
+                            checked: requestedChecked,
+                            responseRevision: revision
+                        });
+
+                        if (revision === this.listRevision + 1) {
                             // Whichever request committed at the newest revision
                             // is canonical, even when rapid toggles return out of order.
                             item.checked = requestedChecked;
                             this.listRevision = revision;
+                            this.syncLog('mutation response applied', {
+                                itemId: item.id,
+                                responseRevision: revision
+                            });
+                        } else if (revision > this.listRevision + 1) {
+                            // Advancing directly would hide intervening events that
+                            // have not arrived yet. Reload the complete state instead.
+                            this.syncLog('mutation response found revision gap; refreshing', {
+                                itemId: item.id,
+                                responseRevision: revision,
+                                expectedRevision: this.listRevision + 1
+                            });
+                            await this.refreshList();
+                        } else {
+                            this.syncLog('mutation response already covered by events', {
+                                itemId: item.id,
+                                responseRevision: revision
+                            });
                         }
                     } catch (error) {
                         // Revert on failure
@@ -817,16 +865,21 @@
 
                     const source = new EventSource(`/api/list/${this.listId}/events`);
                     source.addEventListener('list-change', (event) => this.handleListEvent(event));
+                    source.onopen = () => this.syncLog('event stream opened');
                     source.onerror = () => {
                         // EventSource reconnects automatically. The connected
                         // event carries a revision so missed changes are caught up.
-                        console.debug('List event stream disconnected; reconnecting');
+                        this.syncLog('event stream disconnected; reconnecting', {
+                            readyState: source.readyState
+                        });
                     };
                     this.eventSource = source;
+                    this.syncLog('event stream connecting');
                 },
 
                 disconnectFromListEvents() {
                     if (this.eventSource) {
+                        this.syncLog('event stream closed');
                         this.eventSource.close();
                         this.eventSource = null;
                     }
@@ -842,15 +895,40 @@
                     }
 
                     const revision = Number(event.revision);
-                    if (!Number.isInteger(revision)) return;
-
-                    if (event.type === 'connected') {
-                        if (revision !== this.listRevision) this.refreshList();
+                    this.syncLog('event received', {
+                        eventType: event.type,
+                        eventRevision: revision,
+                        itemId: event.item_id,
+                        checked: event.checked
+                    });
+                    if (!Number.isInteger(revision)) {
+                        this.syncLog('event ignored: invalid revision', { eventRevision: event.revision });
                         return;
                     }
 
-                    if (revision <= this.listRevision) return;
+                    if (event.type === 'connected') {
+                        if (revision !== this.listRevision) {
+                            this.syncLog('connected revision differs; refreshing', {
+                                eventRevision: revision
+                            });
+                            this.refreshList();
+                        } else {
+                            this.syncLog('connected revision matches');
+                        }
+                        return;
+                    }
+
+                    if (revision <= this.listRevision) {
+                        this.syncLog('event ignored: revision already applied', {
+                            eventRevision: revision
+                        });
+                        return;
+                    }
                     if (revision !== this.listRevision + 1) {
+                        this.syncLog('event found revision gap; refreshing', {
+                            eventRevision: revision,
+                            expectedRevision: this.listRevision + 1
+                        });
                         this.refreshList();
                         return;
                     }
@@ -860,16 +938,29 @@
                             .flatMap(group => group.items)
                             .find(candidate => candidate.id === event.item_id);
                         if (!item) {
+                            this.syncLog('event item missing; refreshing', {
+                                eventRevision: revision,
+                                itemId: event.item_id
+                            });
                             this.refreshList();
                             return;
                         }
                         item.checked = event.checked;
                         this.listRevision = revision;
+                        this.syncLog('item event applied', {
+                            eventRevision: revision,
+                            itemId: event.item_id,
+                            checked: event.checked
+                        });
                         return;
                     }
 
                     // Structural changes replace item IDs, so load the complete
                     // canonical state. Future add/remove events can be applied here.
+                    this.syncLog('structural event received; refreshing', {
+                        eventType: event.type,
+                        eventRevision: revision
+                    });
                     this.refreshList();
                 },
 
@@ -877,9 +968,11 @@
                     if (!this.listId) return;
                     if (this.isRefreshing) {
                         this.refreshQueued = true;
+                        this.syncLog('refresh queued');
                         return;
                     }
                     this.isRefreshing = true;
+                    this.syncLog('refresh started');
                     try {
                         do {
                             this.refreshQueued = false;
@@ -887,6 +980,7 @@
                         } while (this.refreshQueued && this.listId);
                     } finally {
                         this.isRefreshing = false;
+                        this.syncLog('refresh finished');
                     }
                 }
             },
