@@ -479,7 +479,12 @@ async def process_text(request: ProcessTextRequest):
                 raise HTTPException(status_code=500, detail="Invalid item format from LLM")
 
         # Save to database
-        list_id = database.create_shopping_list(items, request.supermarket)
+        list_id = database.create_shopping_list(
+            items,
+            request.supermarket,
+            raw_input=request.text,
+            input_type="text"
+        )
 
         # Get the formatted response
         list_data = database.get_shopping_list(list_id)
@@ -527,7 +532,12 @@ async def process_image(request: ProcessImageRequest):
                 raise HTTPException(status_code=500, detail="Invalid item format from LLM")
 
         # Save to database
-        list_id = database.create_shopping_list(items, request.supermarket)
+        list_id = database.create_shopping_list(
+            items,
+            request.supermarket,
+            raw_input=extracted_text,
+            input_type="image"
+        )
 
         # Get the formatted response
         list_data = database.get_shopping_list(list_id)

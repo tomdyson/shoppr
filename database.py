@@ -38,13 +38,15 @@ def init_db():
         CREATE TABLE IF NOT EXISTS shopping_lists (
             id TEXT PRIMARY KEY,
             supermarket TEXT,
+            raw_input TEXT,
+            input_type TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             revision INTEGER NOT NULL DEFAULT 0
         )
         ''')
 
-        # Ensure versioning columns exist (migration for existing DBs)
+        # Ensure versioning and raw_input columns exist (migration for existing DBs)
         cursor = conn.execute('PRAGMA table_info(shopping_lists)')
         columns = {row[1] for row in cursor.fetchall()}
         if 'updated_at' not in columns:
@@ -56,6 +58,10 @@ def init_db():
             conn.execute(
                 'ALTER TABLE shopping_lists ADD COLUMN revision INTEGER NOT NULL DEFAULT 0'
             )
+        if 'raw_input' not in columns:
+            conn.execute('ALTER TABLE shopping_lists ADD COLUMN raw_input TEXT')
+        if 'input_type' not in columns:
+            conn.execute('ALTER TABLE shopping_lists ADD COLUMN input_type TEXT')
 
         conn.execute('''
         CREATE TABLE IF NOT EXISTS shopping_items (
@@ -84,14 +90,19 @@ def init_db():
         conn.commit()
 
 
-def create_shopping_list(items: List[dict], supermarket: Optional[str] = None) -> str:
+def create_shopping_list(
+    items: List[dict],
+    supermarket: Optional[str] = None,
+    raw_input: Optional[str] = None,
+    input_type: Optional[str] = None
+) -> str:
     """Create a new shopping list with items."""
     list_id = generate_slug()
 
     with get_db() as conn:
         conn.execute(
-            'INSERT INTO shopping_lists (id, supermarket) VALUES (?, ?)',
-            (list_id, supermarket)
+            'INSERT INTO shopping_lists (id, supermarket, raw_input, input_type) VALUES (?, ?, ?, ?)',
+            (list_id, supermarket, raw_input, input_type)
         )
 
         for i, item in enumerate(items):
@@ -119,7 +130,7 @@ def get_shopping_list(list_id: str) -> Optional[dict]:
     with get_db() as conn:
         # Check if list exists and get supermarket
         list_row = conn.execute(
-            'SELECT id, supermarket, updated_at, revision FROM shopping_lists WHERE id = ?',
+            'SELECT id, supermarket, raw_input, input_type, updated_at, revision FROM shopping_lists WHERE id = ?',
             (list_id,)
         ).fetchone()
 
@@ -157,6 +168,8 @@ def get_shopping_list(list_id: str) -> Optional[dict]:
         return {
             'list_id': list_row['id'],
             'supermarket': list_row['supermarket'],
+            'raw_input': list_row['raw_input'],
+            'input_type': list_row['input_type'],
             'updated_at': list_row['updated_at'],
             'revision': list_row['revision'],
             'groups': sorted_groups

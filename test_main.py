@@ -84,8 +84,14 @@ def mock_llm_usage():
 # Test 1: Database - Create and retrieve shopping list
 def test_database_create_and_get_list(temp_db, mock_llm_response):
     """Test creating a shopping list and retrieving it from database."""
-    # Create a list
-    list_id = database.create_shopping_list(mock_llm_response, "tesco")
+    # Create a list with raw_input and input_type
+    raw_text = "Milk 2L\nBananas 6\nBread"
+    list_id = database.create_shopping_list(
+        mock_llm_response,
+        "tesco",
+        raw_input=raw_text,
+        input_type="text"
+    )
 
     # Verify list ID format (5-char alphanumeric)
     assert len(list_id) == 5
@@ -98,6 +104,8 @@ def test_database_create_and_get_list(temp_db, mock_llm_response):
     assert list_data is not None
     assert list_data['list_id'] == list_id
     assert list_data['supermarket'] == 'tesco'
+    assert list_data['raw_input'] == raw_text
+    assert list_data['input_type'] == 'text'
     assert len(list_data['groups']) == 3  # 3 different areas
 
     # Verify items are grouped correctly
