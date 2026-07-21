@@ -69,6 +69,7 @@ A mobile-first shopping list app using FastAPI + Vue.js + LiteLLM proxy for AI-p
 
 ### Database
 - SQLite with two tables: `shopping_lists` and `shopping_items`
+- `shopping_lists` stores `raw_input` (pasted text or OCR text) and `input_type` (`text` / `image`) for prompt optimization analysis
 - 5-character URL slugs for list sharing
 - Automatic cleanup after 28 days (via `cleanup.py`)
 
