@@ -433,6 +433,7 @@
                 eventSource: null,
                 isRefreshing: false,
                 refreshQueued: false,
+                pendingMutations: new Map(),
                 syncClientId: Math.random().toString(36).slice(2, 7),
                 syncDebug: new URLSearchParams(window.location.search).get('debug-sync') === '1',
 
@@ -563,26 +564,52 @@
                     }
                 },
 
+                findItem(itemId) {
+                    if (!this.groups) return null;
+                    for (const group of this.groups) {
+                        const item = group.items.find(i => i.id === itemId);
+                        if (item) return item;
+                    }
+                    return null;
+                },
+
                 showList(data, updateUrl = true) {
-                    this.disconnectFromListEvents();
+                    if (this.listId !== data.list_id) {
+                        this.disconnectFromListEvents();
+                    }
                     this.listId = data.list_id;
                     this.supermarket = data.supermarket;
                     this.supermarketDisplay = data.supermarket_display;
+
+                    // Apply pending local mutations to snapshot items so in-flight
+                    // checks are not accidentally reverted by an older snapshot.
+                    if (data.groups && this.pendingMutations) {
+                        for (const group of data.groups) {
+                            for (const item of group.items) {
+                                if (this.pendingMutations.has(item.id)) {
+                                    item.checked = this.pendingMutations.get(item.id);
+                                }
+                            }
+                        }
+                    }
+
                     this.groups = data.groups;
                     this.meta = data.meta || null;
-                    this.listRevision = data.revision || 0;
+                    this.listRevision = Math.max(this.listRevision, data.revision || 0);
                     this.isViewMode = true;
                     this.syncLog('snapshot applied', {
                         snapshotRevision: data.revision,
                         itemCount: data.groups.reduce((count, group) => count + group.items.length, 0)
                     });
 
-                    // Select first unchecked item
-                    for (const group of this.groups) {
-                        const unchecked = group.items.find(i => !i.checked);
-                        if (unchecked) {
-                            this.selectedItemId = unchecked.id;
-                            break;
+                    // Select first unchecked item if none selected or selection is invalid
+                    if (!this.selectedItemId || !this.findItem(this.selectedItemId)) {
+                        for (const group of this.groups) {
+                            const unchecked = group.items.find(i => !i.checked);
+                            if (unchecked) {
+                                this.selectedItemId = unchecked.id;
+                                break;
+                            }
                         }
                     }
 
@@ -618,16 +645,22 @@
                 },
 
                 async toggleItem(item) {
+                    const itemId = item.id;
                     const previousChecked = item.checked;
                     const requestedChecked = !item.checked;
-                    item.checked = requestedChecked;
+
+                    // Optimistically update item in active groups array
+                    const targetItem = this.findItem(itemId) || item;
+                    targetItem.checked = requestedChecked;
+
+                    this.pendingMutations.set(itemId, requestedChecked);
                     this.syncLog('mutation requested', {
-                        itemId: item.id,
+                        itemId: itemId,
                         checked: requestedChecked
                     });
 
                     try {
-                        const response = await fetch(`/api/list/${this.listId}/item/${item.id}`, {
+                        const response = await fetch(`/api/list/${this.listId}/item/${itemId}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ checked: requestedChecked })
@@ -638,41 +671,36 @@
                         const data = await response.json();
                         const revision = Number(data.revision);
                         this.syncLog('mutation response received', {
-                            itemId: item.id,
+                            itemId: itemId,
                             checked: requestedChecked,
                             responseRevision: revision
                         });
 
-                        if (revision === this.listRevision + 1) {
-                            // Whichever request committed at the newest revision
-                            // is canonical, even when rapid toggles return out of order.
-                            item.checked = requestedChecked;
-                            this.listRevision = revision;
-                            this.syncLog('mutation response applied', {
-                                itemId: item.id,
-                                responseRevision: revision
-                            });
-                        } else if (revision > this.listRevision + 1) {
-                            // Advancing directly would hide intervening events that
-                            // have not arrived yet. Reload the complete state instead.
+                        // Ensure active item in this.groups retains requested status
+                        const currentItem = this.findItem(itemId);
+                        if (currentItem) {
+                            currentItem.checked = requestedChecked;
+                        }
+
+                        this.listRevision = Math.max(this.listRevision, revision);
+
+                        if (revision > this.listRevision + 1) {
                             this.syncLog('mutation response found revision gap; refreshing', {
-                                itemId: item.id,
+                                itemId: itemId,
                                 responseRevision: revision,
-                                expectedRevision: this.listRevision + 1
+                                expectedRevision: this.listRevision
                             });
                             await this.refreshList();
-                        } else {
-                            this.syncLog('mutation response already covered by events', {
-                                itemId: item.id,
-                                responseRevision: revision
-                            });
                         }
                     } catch (error) {
                         // Revert on failure
-                        item.checked = previousChecked;
+                        const currentItem = this.findItem(itemId) || item;
+                        currentItem.checked = previousChecked;
                         console.error('Error updating item:', error);
                         this.errorMessage = 'Could not update the item. The list has been refreshed.';
                         await this.refreshList();
+                    } finally {
+                        this.pendingMutations.delete(itemId);
                     }
                 },
 
@@ -740,6 +768,9 @@
 
                 newList() {
                     this.disconnectFromListEvents();
+                    if (this.pendingMutations) {
+                        this.pendingMutations.clear();
+                    }
                     this.isViewMode = false;
                     this.listId = null;
                     this.groups = [];
@@ -862,6 +893,7 @@
 
                 connectToListEvents() {
                     if (!this.listId || typeof EventSource === 'undefined') return;
+                    if (this.eventSource) return;
 
                     const source = new EventSource(`/api/list/${this.listId}/events`);
                     source.addEventListener('list-change', (event) => this.handleListEvent(event));
@@ -907,13 +939,13 @@
                     }
 
                     if (event.type === 'connected') {
-                        if (revision !== this.listRevision) {
-                            this.syncLog('connected revision differs; refreshing', {
+                        if (revision > this.listRevision) {
+                            this.syncLog('connected revision is newer; refreshing', {
                                 eventRevision: revision
                             });
                             this.refreshList();
                         } else {
-                            this.syncLog('connected revision matches');
+                            this.syncLog('connected revision up-to-date');
                         }
                         return;
                     }
@@ -934,9 +966,7 @@
                     }
 
                     if (event.type === 'item.updated') {
-                        const item = this.groups
-                            .flatMap(group => group.items)
-                            .find(candidate => candidate.id === event.item_id);
+                        const item = this.findItem(event.item_id);
                         if (!item) {
                             this.syncLog('event item missing; refreshing', {
                                 eventRevision: revision,
@@ -945,7 +975,9 @@
                             this.refreshList();
                             return;
                         }
-                        item.checked = event.checked;
+                        if (!this.pendingMutations || !this.pendingMutations.has(event.item_id)) {
+                            item.checked = event.checked;
+                        }
                         this.listRevision = revision;
                         this.syncLog('item event applied', {
                             eventRevision: revision,

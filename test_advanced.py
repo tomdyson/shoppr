@@ -255,3 +255,80 @@ def test_version_not_found(client, temp_db):
 
     response = client.get("/api/list/abcde/events")
     assert response.status_code == 404
+
+
+def test_multi_tab_live_updates_fanout(client, temp_db):
+    """Simulate two tabs subscribed to real-time events checking off different items."""
+    list_data_two_items = [
+        {"name": "Milk", "quantity": "1 pint", "area": "dairy", "area_order": 1},
+        {"name": "Bread", "quantity": "1 loaf", "area": "bakery", "area_order": 2},
+    ]
+    list_id = database.create_shopping_list(list_data_two_items, "tesco")
+    list_data = database.get_shopping_list(list_id)
+
+    # Get two items from the list to toggle from separate tabs
+    item1_id = list_data['groups'][0]['items'][0]['id']
+    item2_id = list_data['groups'][1]['items'][0]['id']
+
+    # Subscribe Tab 1 and Tab 2 event listeners
+    tab1_queue = main.list_event_broker.subscribe(list_id)
+    tab2_queue = main.list_event_broker.subscribe(list_id)
+
+    try:
+        # Tab 1 checks item 1
+        res1 = client.put(f"/api/list/{list_id}/item/{item1_id}", json={"checked": True})
+        assert res1.status_code == 200
+        rev1 = res1.json()["revision"]
+
+        # Tab 2 checks item 2
+        res2 = client.put(f"/api/list/{list_id}/item/{item2_id}", json={"checked": True})
+        assert res2.status_code == 200
+        rev2 = res2.json()["revision"]
+
+        # Monotonic revision sequence: rev2 must be rev1 + 1
+        assert rev1 == 1
+        assert rev2 == 2
+
+        # Both Tab 1 and Tab 2 queues must receive both update events in exact sequence
+        event1_tab1 = tab1_queue.get_nowait()
+        event2_tab1 = tab1_queue.get_nowait()
+
+        event1_tab2 = tab2_queue.get_nowait()
+        event2_tab2 = tab2_queue.get_nowait()
+
+        assert event1_tab1 == {"type": "item.updated", "revision": 1, "item_id": item1_id, "checked": True}
+        assert event2_tab1 == {"type": "item.updated", "revision": 2, "item_id": item2_id, "checked": True}
+
+        assert event1_tab2 == event1_tab1
+        assert event2_tab2 == event2_tab1
+
+        # Verify DB state has both items checked
+        updated_list = database.get_shopping_list(list_id)
+        items_by_id = {i['id']: i['checked'] for g in updated_list['groups'] for i in g['items']}
+        assert items_by_id[item1_id] is True
+        assert items_by_id[item2_id] is True
+    finally:
+        main.list_event_broker.unsubscribe(list_id, tab1_queue)
+        main.list_event_broker.unsubscribe(list_id, tab2_queue)
+
+
+def test_sse_events_stream_endpoint(client, temp_db, mock_list_data):
+    """Test connected event emission on list events endpoint."""
+    list_id = database.create_shopping_list(mock_list_data, "tesco")
+
+    # Connect to event stream
+    with client.stream("GET", f"/api/list/{list_id}/events") as response:
+        assert response.status_code == 200
+        assert "text/event-stream" in response.headers["content-type"]
+
+        # Read first SSE message chunk
+        lines = []
+        for line in response.iter_lines():
+            if line:
+                lines.append(line)
+            if len(lines) >= 2:
+                break
+
+        assert lines[0] == "event: list-change"
+        assert lines[1] == 'data: {"type":"connected","revision":0}'
+
