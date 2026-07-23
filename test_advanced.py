@@ -128,8 +128,8 @@ def test_pdf_invalid_id(client):
 
 def test_llm_failure_process(client, temp_db):
     """Test graceful handling of LLM failure in process endpoint."""
-    with patch("main.litellm_client.chat_completion") as mock_llm:
-        # Simulate an exception from requests or litellm
+    with patch("main.openrouter_client.chat_completion") as mock_llm:
+        # Simulate an exception from requests or openrouter
         mock_llm.side_effect = Exception("API connection failed")
 
         response = client.post(
@@ -143,7 +143,7 @@ def test_llm_failure_process(client, temp_db):
 
 def test_llm_invalid_json(client, temp_db):
     """Test handling of invalid JSON from LLM."""
-    with patch("main.litellm_client.chat_completion") as mock_llm:
+    with patch("main.openrouter_client.chat_completion") as mock_llm:
         # Return invalid JSON
         mock_llm.return_value = ("Not JSON at all", {"input_tokens": 10, "output_tokens": 5, "cost": 0.0})
 

@@ -8,7 +8,7 @@ This document outlines the design and implementation plan for Shoppr's automated
 
 - **Accuracy & Precision:** Measure how reliably items are parsed, normalized, and categorized into correct store areas.
 - **Prompt Engineering & A/B Testing:** Evaluate prompt iterations ([prompts/](file:///Users/tom/Documents/code/python/shoppr/prompts)) against standard benchmarks before deploying.
-- **Model Cost & Speed Optimization:** Test smaller, faster, and cheaper models (e.g., `gemini-2.5-flash-lite`) against golden benchmarks to maximize performance while minimizing LiteLLM proxy costs.
+- **Model Cost & Speed Optimization:** Test smaller, faster, and cheaper models (e.g., `google/gemini-2.5-flash-lite`) against golden benchmarks to maximize performance while minimizing OpenRouter API costs.
 - **Zero-Regression CI/CD:** Prevent functional regressions when updating system prompts or store layout definitions.
 
 ---
@@ -96,7 +96,7 @@ Instead of manually annotating hundreds of shopping lists, we use a frontier "Te
 | **Quantity Extraction Accuracy** | > 90% | Precision of quantity and unit parsing (e.g., `"2L"`, `"500g"`). |
 | **Aisle Sequence Order Score** | 100% | Strict adherence of `area_order` to the store's layout prompt map. |
 | **Schema Strictness** | 100% | Percentage of LLM responses passing valid JSON schema validation without syntax errors. |
-| **Cost & Latency Benchmark** | Metric | Average execution time (ms) and LiteLLM token cost ($) per processed list. |
+| **Cost & Latency Benchmark** | Metric | Average execution time (ms) and OpenRouter token cost ($) per processed list. |
 
 ---
 

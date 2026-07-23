@@ -4,7 +4,7 @@ This file contains important reminders and context for Claude Code when working 
 
 ## Project: Shoppr
 
-A mobile-first shopping list app using FastAPI + Vue.js + LiteLLM proxy for AI-powered categorization.
+A mobile-first shopping list app using FastAPI + Vue.js + OpenRouter API for AI-powered categorization.
 
 ## Deployment Checklist
 
@@ -41,22 +41,22 @@ A mobile-first shopping list app using FastAPI + Vue.js + LiteLLM proxy for AI-p
 **Solution**: Dockerfile now uses `COPY *.py ./` to catch all Python files automatically
 
 ### Environment Variable Missing
-**Symptom**: `ValueError: LITELLM_API_KEY environment variable is required`
+**Symptom**: `ValueError: OPENROUTER_API_KEY environment variable is required`
 **Solution**: Ensure all required env vars are set in deployment platform
 
 ### Cost Tracking Not Working
 **Symptom**: Costs show as 0.0 in API responses
 **Solution**:
-- Verify proxy returns `x-litellm-response-cost` header
-- Check proxy authentication is working
-- Review logs for "Warning: No cost header in response"
+- Verify API response contains cost field in usage object or fallback cost headers
+- Check OpenRouter API key authentication is working
+- Review logs for warning messages
 
 ## Architecture Notes
 
 ### LLM Integration
-- Uses LiteLLM proxy at `https://litellm.co.tomd.org`
-- Model names must include provider prefix: `gemini/gemini-2.5-flash-lite`
-- Cost tracking via response headers (see `litellm_client.py`)
+- Uses OpenRouter API at `https://openrouter.ai/api/v1`
+- Model names include provider prefix if required (e.g. `google/gemini-2.5-flash-lite`)
+- Cost tracking via OpenRouter response usage object (see `openrouter_client.py`)
 - Three LLM call sites in `main.py`:
   - `process_items_with_llm()` - Text categorization
   - `ocr_image_with_llm()` - Image OCR (vision API)
@@ -98,7 +98,7 @@ Always run the test suite before deploying changes:
 source .venv/bin/activate
 
 # Run all tests
-LITELLM_API_KEY=test pytest test_main.py test_advanced.py -v
+OPENROUTER_API_KEY=test pytest test_main.py test_advanced.py -v
 
 # Run specific test
 pytest test_main.py::test_api_process_text -v

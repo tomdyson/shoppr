@@ -36,7 +36,7 @@ Each supermarket has a custom prompt defining its typical store layout, so items
 | Frontend | Vue.js 2 (CDN) |
 | Styling | Tailwind CSS |
 | Database | SQLite |
-| LLM | Gemini via LiteLLM Proxy |
+| LLM | Gemini via OpenRouter API |
 | Deployment | Docker |
 
 ## Quick Start
@@ -45,7 +45,7 @@ Each supermarket has a custom prompt defining its typical store layout, so items
 
 - Python 3.11+
 - Node.js 18+ (for Tailwind CSS build)
-- Access to a LiteLLM proxy with API key (or set up your own)
+- OpenRouter API key
 
 ### Installation
 
@@ -73,29 +73,24 @@ cp .env.example .env
 Edit `.env` with your settings:
 
 ```env
-# LLM Configuration - LiteLLM Proxy
-LITELLM_PROXY_URL=https://litellm.co.tomd.org
-LITELLM_API_KEY=your-litellm-proxy-key-here
-LITELLM_MODEL_PREFIX=gemini/       # Provider prefix (optional, set to "" if using full names)
-LLM_MODEL=gemini/gemini-2.5-flash-lite    # Model for categorization
-LLM_VISION_MODEL=gemini/gemini-2.5-flash  # Model for OCR (must support vision)
+# LLM Configuration - OpenRouter
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_API_KEY=your-openrouter-api-key-here
+OPENROUTER_MODEL_PREFIX=                # Optional provider prefix if using short names
+LLM_MODEL=google/gemini-2.5-flash-lite  # Model for categorization
+LLM_VISION_MODEL=google/gemini-2.5-flash # Model for OCR (must support vision)
 
 # Database
 DB_PATH=shopping.db
 ```
 
-#### LiteLLM Proxy Setup
+#### OpenRouter API Setup
 
-The app uses a [LiteLLM proxy](https://docs.litellm.ai/docs/proxy/quick_start) for LLM requests, which provides:
+The app uses the [OpenRouter API](https://openrouter.ai/docs) for LLM requests, which provides:
 
-- **Unified API**: Single interface for multiple LLM providers (OpenAI, Anthropic, Google, etc.)
-- **Automatic cost tracking**: Costs tracked via response headers
-- **Request logging**: Monitor usage and debugging
-- **Load balancing**: Distribute requests across providers
-
-**Model Naming**: Model names should include the provider prefix (e.g., `gemini/gemini-2.5-flash-lite`) to match your proxy configuration. The `LITELLM_MODEL_PREFIX` setting can automatically add the prefix if you use short names.
-
-Set up your own proxy or use an existing one. The proxy handles provider-specific API keys and routing.
+- **Unified API**: Access to hundreds of LLM models (Google, Anthropic, OpenAI, Meta, etc.)
+- **Automatic cost tracking**: Costs returned directly in response usage metadata
+- **Model Naming**: Model names typically include provider prefixes (e.g., `google/gemini-2.5-flash-lite`).
 
 ### Running the App
 
@@ -260,7 +255,7 @@ pytest test_main.py -v
 pytest test_main.py::test_api_process_text -v
 
 # Run advanced tests (PDF, error handling, etc.)
-LITELLM_API_KEY=test pytest test_advanced.py -v
+OPENROUTER_API_KEY=test pytest test_advanced.py -v
 ```
 
 The test suite (`test_main.py`) covers:
@@ -436,6 +431,6 @@ MIT License - see LICENSE file for details.
 ## Acknowledgments
 
 - Built with [FastAPI](https://fastapi.tiangolo.com/)
-- LLM integration via [LiteLLM Proxy](https://docs.litellm.ai/)
+- LLM integration via [OpenRouter API](https://openrouter.ai/)
 - Styled with [Tailwind CSS](https://tailwindcss.com/)
 - Frontend powered by [Vue.js](https://vuejs.org/)

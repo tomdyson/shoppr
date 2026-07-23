@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple, Set
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from litellm_client import LiteLLMClient
+from openrouter_client import OpenRouterClient
 from fastapi import FastAPI, HTTPException, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
@@ -48,21 +48,21 @@ app.add_middleware(
 )
 
 # Get environment variables
-LITELLM_PROXY_URL = os.getenv("LITELLM_PROXY_URL", "https://litellm.co.tomd.org")
-LITELLM_API_KEY = os.getenv("LITELLM_API_KEY")
-LITELLM_MODEL_PREFIX = os.getenv("LITELLM_MODEL_PREFIX", "gemini/")
-MODEL_NAME = os.getenv("LLM_MODEL", "gemini-2.5-flash-lite")
-VISION_MODEL_NAME = os.getenv("LLM_VISION_MODEL", "gemini-2.5-flash")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_MODEL_PREFIX = os.getenv("OPENROUTER_MODEL_PREFIX", "")
+MODEL_NAME = os.getenv("LLM_MODEL", "google/gemini-2.5-flash-lite")
+VISION_MODEL_NAME = os.getenv("LLM_VISION_MODEL", "google/gemini-2.5-flash")
 
 # Validate configuration
-if not LITELLM_API_KEY:
-    raise ValueError("LITELLM_API_KEY environment variable is required")
+if not OPENROUTER_API_KEY:
+    raise ValueError("OPENROUTER_API_KEY environment variable is required")
 
-# Initialize global litellm client
-litellm_client = LiteLLMClient(
-    base_url=LITELLM_PROXY_URL,
-    api_key=LITELLM_API_KEY,
-    model_prefix=LITELLM_MODEL_PREFIX
+# Initialize global OpenRouter client
+openrouter_client = OpenRouterClient(
+    base_url=OPENROUTER_BASE_URL,
+    api_key=OPENROUTER_API_KEY,
+    model_prefix=OPENROUTER_MODEL_PREFIX
 )
 
 # Supermarket options
@@ -254,8 +254,8 @@ IMPORTANT: Respond ONLY with the JSON array, no additional text."""
         {"role": "user", "content": items_text}
     ]
 
-    # Make request via litellm proxy
-    raw_response, usage_stats = litellm_client.chat_completion(
+    # Make request via OpenRouter API
+    raw_response, usage_stats = openrouter_client.chat_completion(
         model=MODEL_NAME,
         messages=messages
     )
@@ -299,8 +299,8 @@ def ocr_image_with_llm(image_base64: str) -> Tuple[str, Dict[str, Any]]:
         }
     ]
 
-    # Make request via litellm proxy
-    raw_response, usage_stats = litellm_client.chat_completion(
+    # Make request via OpenRouter API
+    raw_response, usage_stats = openrouter_client.chat_completion(
         model=VISION_MODEL_NAME,
         messages=messages
     )
@@ -386,8 +386,8 @@ EDIT INSTRUCTIONS:
         {"role": "user", "content": user_prompt}
     ]
 
-    # Make request via litellm proxy
-    raw_response, usage_stats = litellm_client.chat_completion(
+    # Make request via OpenRouter API
+    raw_response, usage_stats = openrouter_client.chat_completion(
         model=MODEL_NAME,
         messages=messages
     )
