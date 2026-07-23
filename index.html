@@ -31,14 +31,17 @@
             transition: all 0.3s ease;
         }
 
-        /* Image container transitions like Todonanny */
-        .image-container {
-            transition: width 0.5s ease-in-out;
+        .image-container img {
+            height: auto;
+            width: 100%;
+            max-width: 6rem;
+            transition: max-width 0.4s ease-in-out;
         }
 
-        .image-container img {
-            transition: all 0.5s ease-in-out;
-            height: auto;
+        @media (min-width: 1024px) {
+            .image-container img {
+                max-width: 16rem;
+            }
         }
 
         /* Rose highlight for selected items */
@@ -150,14 +153,14 @@
 
 <body class="flex justify-center min-h-screen pt-6 font-mono text-slate-700">
     <div id="app" class="max-w-screen-md mx-auto w-full p-4 bg-white flex flex-col lg:flex-row">
-        <!-- Image column - smaller when viewing list -->
-        <div class="image-container w-full lg:w-1/5 p-4 pb-0 lg:pb-4 no-print" v-if="isViewMode">
+        <!-- Image column -->
+        <div class="image-container w-full lg:w-1/3 p-4 pb-0 lg:pb-4 no-print" v-if="isViewMode">
             <a href="/" @click.prevent="newList" class="cursor-pointer">
-                <img :src="figureImage" alt="Paris" class="w-24 lg:w-full">
+                <img :src="figureImage" alt="Paris">
             </a>
         </div>
         <div class="image-container w-full lg:w-1/3 p-4 pb-0 lg:pb-4 no-print" v-else>
-            <img src="/paris-figure.jpg" alt="Paris" class="w-24 lg:w-full">
+            <img src="/paris-figure.jpg" alt="Paris">
         </div>
 
         <!-- Main content column -->

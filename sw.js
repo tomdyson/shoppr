@@ -1,4 +1,4 @@
-const CACHE_NAME = 'shoppr-v1';
+const CACHE_NAME = 'shoppr-v2';
 const STATIC_ASSETS = [
     '/',
     '/dist/output.css',
