@@ -247,7 +247,7 @@
                     <div v-for="group in groups" :key="group.area" class="mb-4">
                         <div class="group-header text-sm text-rose-100 uppercase tracking-wide mb-1">{{
                             group.area_display }}</div>
-                        <div v-for="item in group.items" :key="item.id" class="item-row"
+                        <label v-for="item in group.items" :key="item.id" :for="'item-' + item.id" class="item-row cursor-pointer"
                             :class="{
                                 'bg-rose-400': item.id === selectedItemId,
                                 'bg-emerald-400': isItemAdded(item.name) && item.id !== selectedItemId
@@ -257,12 +257,12 @@
                                 @change="toggleItem(item)"
                                 class="mr-2 h-4 w-4 rounded border-gray-300 text-rose-400 focus:ring-rose-300 cursor-pointer">
                             <span :class="{'line-through': item.checked }" class="leading-tight">
-                                <div>
+                                <span class="block">
                                     <span v-if="isItemAdded(item.name)" class="text-xs mr-1">+</span>{{ item.name }}<span v-if="item.quantity" class="text-rose-100 text-sm ml-1">({{
                                         item.quantity }})</span>
-                                </div>
+                                </span>
                             </span>
-                        </div>
+                        </label>
                     </div>
                 </div>
 
@@ -392,9 +392,14 @@
             class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 no-print">
             <div class="bg-white rounded-lg p-6 max-w-sm w-full">
                 <h3 class="font-bold mb-4">Share your list</h3>
-                <input type="text" ref="shareUrl" :value="shareUrl" class="w-full p-2 border rounded mb-4 bg-slate-50"
+                <input type="text" ref="shareUrl" :value="shareUrl" aria-label="Share link" class="w-full p-2 border rounded mb-4 bg-slate-50"
                     readonly @click="$refs.shareUrl.select()">
+                <p v-if="shareCopyStatus === 'copied'" role="status" class="text-sm text-emerald-600 mb-4">Link copied to clipboard.</p>
+                <p v-else-if="shareCopyStatus === 'failed'" role="status" class="text-sm text-slate-600 mb-4">Select the link above to copy it manually.</p>
                 <div class="flex justify-end space-x-2">
+                    <button @click="copyShareLink" class="px-4 py-2 rounded hover:opacity-75 bg-green-100">
+                        Copy link
+                    </button>
                     <button @click="showShareModal = false" class="px-4 py-2 rounded hover:opacity-75 bg-slate-100">
                         Close
                     </button>
@@ -419,6 +424,7 @@
                 loadingMessage: '',
                 isViewMode: false,
                 showShareModal: false,
+                shareCopyStatus: '',
                 showHelp: false,
                 showDebug: false,
                 errorMessage: '',
@@ -758,7 +764,9 @@
 
                 async shareList() {
                     const url = this.shareUrl;
-                    if (typeof navigator.share === 'function') {
+                    const isTouchFirst = typeof window.matchMedia === 'function' &&
+                        window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+                    if (isTouchFirst && typeof navigator.share === 'function') {
                         try {
                             await navigator.share({ title: 'Shoppr shopping list', url });
                             return;
@@ -768,17 +776,39 @@
                         }
                     }
 
-                    if (navigator.clipboard && navigator.clipboard.writeText) {
-                        try {
-                            await navigator.clipboard.writeText(url);
-                        } catch (err) {
-                            console.error('Failed to copy:', err);
-                        }
-                    }
+                    this.shareCopyStatus = '';
                     this.showShareModal = true;
                     this.$nextTick(() => {
                         this.$refs.shareUrl.select();
                     });
+                    this.copyShareLink();
+                },
+
+                async copyShareLink() {
+                    try {
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                            await navigator.clipboard.writeText(this.shareUrl);
+                            this.shareCopyStatus = 'copied';
+                            return;
+                        }
+                    } catch (err) {
+                        console.error('Failed to copy:', err);
+                    }
+
+                    if (this.$refs.shareUrl) {
+                        this.$refs.shareUrl.select();
+                        if (typeof document.execCommand === 'function') {
+                            try {
+                                if (document.execCommand('copy')) {
+                                    this.shareCopyStatus = 'copied';
+                                    return;
+                                }
+                            } catch (err) {
+                                console.error('Failed to copy:', err);
+                            }
+                        }
+                    }
+                    this.shareCopyStatus = 'failed';
                 },
 
                 newList() {
