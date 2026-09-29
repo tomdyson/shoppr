@@ -472,7 +472,7 @@
                     return Math.round((this.checkedCount / this.totalCount) * 100);
                 },
                 shareUrl() {
-                    return window.location.href;
+                    return `${window.location.origin}/${this.listId}`;
                 },
                 totalCost() {
                     let cost = 0;
@@ -756,17 +756,29 @@
                     this.imageData = null;
                 },
 
-                shareList() {
-                    navigator.clipboard.writeText(window.location.href)
-                        .then(() => {
-                            this.showShareModal = true;
-                            this.$nextTick(() => {
-                                this.$refs.shareUrl.select();
-                            });
-                        })
-                        .catch(err => {
+                async shareList() {
+                    const url = this.shareUrl;
+                    if (typeof navigator.share === 'function') {
+                        try {
+                            await navigator.share({ title: 'Shoppr shopping list', url });
+                            return;
+                        } catch (err) {
+                            if (err.name === 'AbortError') return;
+                            console.error('Failed to share:', err);
+                        }
+                    }
+
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        try {
+                            await navigator.clipboard.writeText(url);
+                        } catch (err) {
                             console.error('Failed to copy:', err);
-                        });
+                        }
+                    }
+                    this.showShareModal = true;
+                    this.$nextTick(() => {
+                        this.$refs.shareUrl.select();
+                    });
                 },
 
                 newList() {
