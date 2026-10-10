@@ -158,7 +158,7 @@ def test_llm_invalid_json(client, temp_db):
 
 def test_ocr_failure(client, temp_db):
     """Test handling of OCR failure (empty result)."""
-    with patch("main.ocr_image_with_llm") as mock_ocr:
+    with patch("main.ocr_images_with_llm") as mock_ocr:
         # Mock OCR returning empty text
         mock_ocr.return_value = ("", {})
 
@@ -169,6 +169,89 @@ def test_ocr_failure(client, temp_db):
 
         assert response.status_code == 400
         assert "Could not extract any text" in response.json()["detail"]
+
+
+def test_process_multiple_images(client, temp_db, mock_list_data):
+    """Test that several images are OCR'd together into one list."""
+    images = ["data:image/png;base64,first", "data:image/jpeg;base64,second"]
+    with patch("main.ocr_images_with_llm") as mock_ocr, \
+         patch("main.process_items_with_llm") as mock_process:
+        mock_ocr.return_value = ("milk\nbread", {"cost": 0.0002})
+        mock_process.return_value = (mock_list_data, {"cost": 0.0001})
+
+        response = client.post(
+            "/api/process-image",
+            json={"images": images, "supermarket": "tesco"}
+        )
+
+        assert response.status_code == 200
+        mock_ocr.assert_called_once_with(images)
+        mock_process.assert_called_once_with("milk\nbread", "tesco")
+
+        list_id = response.json()["list_id"]
+        with database.get_db() as conn:
+            row = conn.execute(
+                "SELECT raw_input, input_type FROM shopping_lists WHERE id = ?",
+                (list_id,)
+            ).fetchone()
+        assert row["raw_input"] == "milk\nbread"
+        assert row["input_type"] == "image"
+
+
+def test_process_image_requires_an_image(client, temp_db):
+    """Test that a request with no images is rejected before any LLM call."""
+    with patch("main.ocr_images_with_llm") as mock_ocr:
+        for payload in ({}, {"images": []}, {"images": [""]}):
+            response = client.post("/api/process-image", json=payload)
+            assert response.status_code == 400
+            assert response.json()["detail"] == "No image provided"
+        mock_ocr.assert_not_called()
+
+
+def test_process_image_rejects_too_many_images(client, temp_db):
+    """Test that more than MAX_IMAGES images is rejected before any LLM call."""
+    images = ["data:image/png;base64,x"] * (main.MAX_IMAGES + 1)
+    with patch("main.ocr_images_with_llm") as mock_ocr:
+        response = client.post("/api/process-image", json={"images": images})
+
+        assert response.status_code == 400
+        assert "Too many images" in response.json()["detail"]
+        mock_ocr.assert_not_called()
+
+
+def test_ocr_sends_every_image_in_one_request():
+    """Test that each image becomes its own image part in a single vision request."""
+    usage = {"model": "vision", "input_tokens": 1, "output_tokens": 1, "cost": 0.0}
+    with patch.object(main.openrouter_client, "chat_completion") as mock_chat:
+        mock_chat.return_value = ("milk", usage)
+
+        text, returned_usage = main.ocr_images_with_llm(
+            ["data:image/png;base64,AAA", "BBB"]
+        )
+
+        assert (text, returned_usage) == ("milk", usage)
+        mock_chat.assert_called_once()
+        assert mock_chat.call_args.kwargs["model"] == main.VISION_MODEL_NAME
+        content = mock_chat.call_args.kwargs["messages"][0]["content"]
+        assert content[0]["type"] == "text"
+        assert "these 2 shopping list images" in content[0]["text"]
+        assert [part["image_url"]["url"] for part in content[1:]] == [
+            "data:image/png;base64,AAA",
+            "data:image/png;base64,BBB",
+        ]
+
+
+def test_ocr_single_image_keeps_single_image_prompt():
+    """Test that a lone image is still described as a single image."""
+    usage = {"model": "vision", "input_tokens": 1, "output_tokens": 1, "cost": 0.0}
+    with patch.object(main.openrouter_client, "chat_completion") as mock_chat:
+        mock_chat.return_value = ("milk", usage)
+
+        main.ocr_images_with_llm(["data:image/png;base64,AAA"])
+
+        content = mock_chat.call_args.kwargs["messages"][0]["content"]
+        assert content[0]["text"].startswith("Extract all text from this shopping list image.")
+        assert len(content) == 2
 
 
 # --- Versioning/Realtime Tests ---

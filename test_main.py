@@ -260,7 +260,7 @@ def test_api_process_image(client, temp_db, mock_llm_response, mock_llm_usage):
         "cost": 0.000456
     }
 
-    with patch('main.ocr_image_with_llm') as mock_ocr, \
+    with patch('main.ocr_images_with_llm') as mock_ocr, \
          patch('main.process_items_with_llm') as mock_process:
 
         mock_ocr.return_value = ("milk\nbread\nbananas", mock_ocr_usage)
@@ -287,8 +287,8 @@ def test_api_process_image(client, temp_db, mock_llm_response, mock_llm_usage):
         assert data['meta']['ocr']['cost'] == 0.000456
         assert data['meta']['planning']['cost'] == 0.000123
 
-        # Verify OCR was called with image
-        mock_ocr.assert_called_once()
+        # Verify OCR was called with the single (legacy "image" field) image
+        mock_ocr.assert_called_once_with([fake_image])
 
 
 # Test 6: API - Edit list endpoint

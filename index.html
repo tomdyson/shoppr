@@ -190,22 +190,24 @@
                         :class="{ 'border-cyan-400 bg-cyan-50': isDragging }" @dragover.prevent="isDragging = true"
                         @dragleave.prevent="isDragging = false" @drop.prevent="handleDrop">
 
-                        <!-- Image preview -->
-                        <div v-if="imagePreview" class="mb-2">
-                            <img :src="imagePreview" class="max-h-32 mx-auto rounded shadow">
-                            <button type="button" @click="clearImage"
-                                class="mt-2 text-sm text-rose-500 hover:text-rose-700">
-                                Remove image
-                            </button>
+                        <!-- Image previews -->
+                        <div v-if="images.length" class="mb-3 flex justify-center gap-3 flex-wrap">
+                            <div v-for="(image, index) in images" :key="image.id" class="relative">
+                                <img :src="image.dataUrl" :alt="'Image ' + (index + 1)" class="h-24 w-auto rounded shadow">
+                                <button type="button" @click="removeImage(index)" :aria-label="'Remove image ' + (index + 1)"
+                                    class="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white shadow text-sm text-rose-500 hover:text-rose-700">
+                                    ✕
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Upload buttons -->
-                        <div v-else class="text-sm text-slate-500">
-                            <p class="mb-2">Or upload an image</p>
+                        <div v-if="images.length < maxImages" class="text-sm text-slate-500">
+                            <p class="mb-2">{{ images.length ? 'Add another image' : 'Or upload images' }}</p>
                             <div class="flex justify-center gap-2 flex-wrap">
                                 <label class="cursor-pointer px-3 py-1 bg-slate-100 rounded hover:bg-slate-200">
-                                    Choose file
-                                    <input type="file" accept="image/*" @change="handleFileSelect" class="hidden">
+                                    Choose files
+                                    <input type="file" accept="image/*" multiple @change="handleFileSelect" class="hidden">
                                 </label>
                                 <label
                                     class="camera-btn cursor-pointer px-3 py-1 bg-slate-100 rounded hover:bg-slate-200">
@@ -219,6 +221,7 @@
                                 </button>
                             </div>
                         </div>
+                        <p v-else class="text-sm text-slate-500">Maximum of {{ maxImages }} images</p>
                     </div>
                 </div>
 
@@ -226,7 +229,7 @@
                 <input id="submit"
                     class="hover:opacity-75 mt-3 cursor-pointer bg-cyan-100 px-2 py-1 rounded text-lg mb-1 disabled:opacity-50 disabled:cursor-not-allowed"
                     type="submit" :value="isLoading ? loadingMessage : 'Create shopping list'"
-                    :disabled="isLoading || (!inputText.trim() && !imageData)" />
+                    :disabled="isLoading || (!inputText.trim() && !images.length)" />
 
                 <!-- Error message -->
                 <div v-if="errorMessage" class="mt-4 p-2 bg-rose-100 text-rose-600 rounded text-sm">
@@ -379,7 +382,7 @@
             class="fixed bottom-16 left-4 p-4 bg-white shadow-lg rounded-lg border border-slate-200 max-w-sm no-print">
             <h3 class="font-bold mb-2">How to Use</h3>
             <div class="text-sm space-y-2">
-                <p>Type or paste your shopping list, or upload an image of a list.</p>
+                <p>Type or paste your shopping list, or upload one or more images of a list.</p>
                 <p class="bg-slate-50 p-2 rounded italic">
                     e.g. Milk 2L, Bread, 6 eggs, Chicken breast 500g
                 </p>
@@ -415,8 +418,9 @@
                 // Input state
                 inputText: '',
                 selectedSupermarket: '',
-                imagePreview: null,
-                imageData: null,
+                images: [],  // [{id, dataUrl}]
+                nextImageId: 0,
+                maxImages: 5,  // Kept in step with MAX_IMAGES in main.py
                 isDragging: false,
 
                 // UI state
@@ -534,13 +538,15 @@
                     try {
                         let response;
 
-                        if (this.imageData) {
-                            this.loadingMessage = 'Processing image...';
+                        if (this.images.length) {
+                            this.loadingMessage = this.images.length > 1
+                                ? `Processing ${this.images.length} images...`
+                                : 'Processing image...';
                             response = await fetch('/api/process-image', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
-                                    image: this.imageData,
+                                    images: this.images.map(image => image.dataUrl),
                                     supermarket: this.selectedSupermarket || null
                                 })
                             });
@@ -714,18 +720,16 @@
                 },
 
                 handleFileSelect(event) {
-                    const file = event.target.files[0];
-                    if (file) {
-                        this.processImageFile(file);
-                    }
+                    this.addImageFiles(Array.from(event.target.files));
+                    // Reset so choosing the same file again still fires change
+                    event.target.value = '';
                 },
 
                 handleDrop(event) {
                     this.isDragging = false;
-                    const file = event.dataTransfer.files[0];
-                    if (file && file.type.startsWith('image/')) {
-                        this.processImageFile(file);
-                    }
+                    const files = Array.from(event.dataTransfer.files)
+                        .filter(file => file.type.startsWith('image/'));
+                    this.addImageFiles(files);
                 },
 
                 async pasteFromClipboard() {
@@ -735,7 +739,7 @@
                             for (const type of item.types) {
                                 if (type.startsWith('image/')) {
                                     const blob = await item.getType(type);
-                                    this.processImageFile(blob);
+                                    this.addImageFiles([blob]);
                                     return;
                                 }
                             }
@@ -747,19 +751,39 @@
                     }
                 },
 
-                processImageFile(file) {
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        this.imagePreview = e.target.result;
-                        this.imageData = e.target.result;
-                        this.inputText = ''; // Clear text if image is added
-                    };
-                    reader.readAsDataURL(file);
+                readAsDataUrl(file) {
+                    return new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.onerror = () => reject(reader.error);
+                        reader.readAsDataURL(file);
+                    });
                 },
 
-                clearImage() {
-                    this.imagePreview = null;
-                    this.imageData = null;
+                async addImageFiles(files) {
+                    for (const file of files) {
+                        if (this.images.length >= this.maxImages) {
+                            this.errorMessage = `You can add up to ${this.maxImages} images.`;
+                            return;
+                        }
+                        try {
+                            const dataUrl = await this.readAsDataUrl(file);
+                            // Re-check: another add may have filled the list while this file was read
+                            if (this.images.length >= this.maxImages) {
+                                this.errorMessage = `You can add up to ${this.maxImages} images.`;
+                                return;
+                            }
+                            this.images.push({ id: ++this.nextImageId, dataUrl });
+                            this.inputText = ''; // Clear text if image is added
+                        } catch (error) {
+                            console.error('Image read error:', error);
+                            this.errorMessage = 'Could not read that image. Please try another.';
+                        }
+                    }
+                },
+
+                removeImage(index) {
+                    this.images.splice(index, 1);
                 },
 
                 async shareList() {
@@ -821,8 +845,7 @@
                     this.groups = [];
                     this.meta = null;
                     this.inputText = '';
-                    this.imagePreview = null;
-                    this.imageData = null;
+                    this.images = [];
                     this.selectedSupermarket = '';
                     this.errorMessage = '';
                     this.selectedItemId = null;
@@ -1078,7 +1101,7 @@
                         if (item.type.startsWith('image/')) {
                             e.preventDefault();
                             const file = item.getAsFile();
-                            this.processImageFile(file);
+                            this.addImageFiles([file]);
                             break;
                         }
                     }
