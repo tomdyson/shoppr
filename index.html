@@ -229,7 +229,7 @@
                 <input id="submit"
                     class="hover:opacity-75 mt-3 cursor-pointer bg-cyan-100 px-2 py-1 rounded text-lg mb-1 disabled:opacity-50 disabled:cursor-not-allowed"
                     type="submit" :value="isLoading ? loadingMessage : 'Create shopping list'"
-                    :disabled="isLoading || (!inputText.trim() && !images.length)" />
+                    :disabled="isLoading || pendingImageReads > 0 || (!inputText.trim() && !images.length)" />
 
                 <!-- Error message -->
                 <div v-if="errorMessage" class="mt-4 p-2 bg-rose-100 text-rose-600 rounded text-sm">
@@ -420,6 +420,7 @@
                 selectedSupermarket: '',
                 images: [],  // [{id, dataUrl}]
                 nextImageId: 0,
+                pendingImageReads: 0,  // Batches of files still being read
                 maxImages: 5,  // Kept in step with MAX_IMAGES in main.py
                 isDragging: false,
 
@@ -761,24 +762,31 @@
                 },
 
                 async addImageFiles(files) {
-                    for (const file of files) {
-                        if (this.images.length >= this.maxImages) {
-                            this.errorMessage = `You can add up to ${this.maxImages} images.`;
-                            return;
-                        }
-                        try {
-                            const dataUrl = await this.readAsDataUrl(file);
-                            // Re-check: another add may have filled the list while this file was read
+                    // Submit stays disabled until every file in the batch is read,
+                    // so a quick tap can't send only part of the selection
+                    this.pendingImageReads++;
+                    try {
+                        for (const file of files) {
                             if (this.images.length >= this.maxImages) {
                                 this.errorMessage = `You can add up to ${this.maxImages} images.`;
                                 return;
                             }
-                            this.images.push({ id: ++this.nextImageId, dataUrl });
-                            this.inputText = ''; // Clear text if image is added
-                        } catch (error) {
-                            console.error('Image read error:', error);
-                            this.errorMessage = 'Could not read that image. Please try another.';
+                            try {
+                                const dataUrl = await this.readAsDataUrl(file);
+                                // Re-check: another add may have filled the list while this file was read
+                                if (this.images.length >= this.maxImages) {
+                                    this.errorMessage = `You can add up to ${this.maxImages} images.`;
+                                    return;
+                                }
+                                this.images.push({ id: ++this.nextImageId, dataUrl });
+                                this.inputText = ''; // Clear text if image is added
+                            } catch (error) {
+                                console.error('Image read error:', error);
+                                this.errorMessage = 'Could not read that image. Please try another.';
+                            }
                         }
+                    } finally {
+                        this.pendingImageReads--;
                     }
                 },
 

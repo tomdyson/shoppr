@@ -57,6 +57,10 @@ VISION_MODEL_NAME = os.getenv("LLM_VISION_MODEL", "google/gemini-2.5-flash")
 # Images per list, kept in step with MAX_IMAGES in index.html
 MAX_IMAGES = 5
 
+# Image types Gemini accepts (ai.google.dev/gemini-api/docs/image-understanding,
+# updated 23 Sep 2026). Anything else is sent labelled image/png, as it always was.
+VISION_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}
+
 # Validate configuration
 if not OPENROUTER_API_KEY:
     raise ValueError("OPENROUTER_API_KEY environment variable is required")
@@ -296,13 +300,18 @@ def ocr_images_with_llm(images_base64: List[str]) -> Tuple[str, Dict[str, Any]]:
 
     content: List[Dict[str, Any]] = [{"type": "text", "text": prompt_text}]
     for image_base64 in images_base64:
-        # Handle data URL format (e.g., "data:image/png;base64,...")
+        media_type = "image/png"
+        # Handle data URL format (e.g., "data:image/jpeg;base64,..."), keeping its
+        # declared type when the vision model accepts it
         if ',' in image_base64:
-            image_base64 = image_base64.split(',')[1]
+            header, image_base64 = image_base64.split(',', 1)
+            declared_type = header.removeprefix("data:").split(';')[0].lower()
+            if declared_type in VISION_IMAGE_TYPES:
+                media_type = declared_type
         content.append({
             "type": "image_url",
             "image_url": {
-                "url": f"data:image/png;base64,{image_base64}"
+                "url": f"data:{media_type};base64,{image_base64}"
             }
         })
 

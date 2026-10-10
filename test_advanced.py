@@ -254,6 +254,28 @@ def test_ocr_single_image_keeps_single_image_prompt():
         assert len(content) == 2
 
 
+def test_ocr_keeps_supported_image_types():
+    """Test that JPEG/WebP keep their type; unknown types and raw base64 fall back to PNG."""
+    usage = {"model": "vision", "input_tokens": 1, "output_tokens": 1, "cost": 0.0}
+    with patch.object(main.openrouter_client, "chat_completion") as mock_chat:
+        mock_chat.return_value = ("milk", usage)
+
+        main.ocr_images_with_llm([
+            "data:image/jpeg;base64,AAA",
+            "data:image/webp;base64,BBB",
+            "data:application/octet-stream;base64,CCC",
+            "DDD",
+        ])
+
+        content = mock_chat.call_args.kwargs["messages"][0]["content"]
+        assert [part["image_url"]["url"] for part in content[1:]] == [
+            "data:image/jpeg;base64,AAA",
+            "data:image/webp;base64,BBB",
+            "data:image/png;base64,CCC",
+            "data:image/png;base64,DDD",
+        ]
+
+
 # --- Versioning/Realtime Tests ---
 
 def test_list_versioning(client, temp_db, mock_list_data):
