@@ -57,6 +57,11 @@ VISION_MODEL_NAME = os.getenv("LLM_VISION_MODEL", "google/gemini-2.5-flash")
 # Images per list, kept in step with MAX_IMAGES in index.html
 MAX_IMAGES = 5
 
+# Combined size of a list's images as sent (data URL characters), kept in step with
+# maxImagesTotalMb in index.html. Gemini caps a whole request at 20 MB including inline
+# image data, so this stays under it whether the base64 text or decoded bytes are counted.
+MAX_IMAGES_TOTAL_MB = 18
+
 # Image types Gemini accepts (ai.google.dev/gemini-api/docs/image-understanding,
 # updated 23 Sep 2026). Anything else is sent labelled image/png, as it always was.
 VISION_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}
@@ -538,6 +543,11 @@ async def process_image(request: ProcessImageRequest):
             raise HTTPException(status_code=400, detail="No image provided")
         if len(images) > MAX_IMAGES:
             raise HTTPException(status_code=400, detail=f"Too many images (maximum {MAX_IMAGES})")
+        if sum(len(image) for image in images) > MAX_IMAGES_TOTAL_MB * 1024 * 1024:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Images are too large to send together (maximum {MAX_IMAGES_TOTAL_MB} MB in total)"
+            )
 
         # OCR the images
         print(f"Starting OCR of {len(images)} image(s)...")

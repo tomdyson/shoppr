@@ -219,6 +219,30 @@ def test_process_image_rejects_too_many_images(client, temp_db):
         mock_ocr.assert_not_called()
 
 
+def test_process_image_limits_combined_size(client, temp_db):
+    """Test that images over MAX_IMAGES_TOTAL_MB combined are rejected before any LLM call."""
+    limit = 1024 * 1024  # 1 MB of data URL characters
+    with patch.object(main, "MAX_IMAGES_TOTAL_MB", 1), \
+         patch("main.ocr_images_with_llm") as mock_ocr:
+        # Each image is under the limit, but together they are over it
+        response = client.post(
+            "/api/process-image",
+            json={"images": ["x" * (limit // 2 + 1), "y" * (limit // 2)]}
+        )
+        assert response.status_code == 400
+        assert "too large to send together" in response.json()["detail"]
+        mock_ocr.assert_not_called()
+
+        # Exactly at the limit is accepted (and reaches OCR)
+        mock_ocr.return_value = ("", {})
+        response = client.post(
+            "/api/process-image",
+            json={"images": ["x" * (limit // 2), "y" * (limit // 2)]}
+        )
+        assert "too large" not in response.json()["detail"]
+        mock_ocr.assert_called_once()
+
+
 def test_ocr_sends_every_image_in_one_request():
     """Test that each image becomes its own image part in a single vision request."""
     usage = {"model": "vision", "input_tokens": 1, "output_tokens": 1, "cost": 0.0}

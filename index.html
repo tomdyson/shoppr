@@ -428,6 +428,7 @@
                 nextImageId: 0,
                 pendingImageReads: 0,  // Batches of files still being read
                 maxImages: 5,  // Kept in step with MAX_IMAGES in main.py
+                maxImagesTotalMb: 18,  // Kept in step with MAX_IMAGES_TOTAL_MB in main.py
                 isDragging: false,
 
                 // UI state
@@ -789,27 +790,33 @@
                     }
                     // Anything that can't be shrunk (e.g. HEIC, which Android browsers
                     // can't decode) is sent as-is, as before.
+                    let canvas = null;
                     try {
                         const img = await this.loadImage(file);
                         const scale = Math.min(1, IMAGE_MAX_DIMENSION / Math.max(img.naturalWidth, img.naturalHeight));
-                        const canvas = document.createElement('canvas');
+                        canvas = document.createElement('canvas');
                         canvas.width = Math.round(img.naturalWidth * scale);
                         canvas.height = Math.round(img.naturalHeight * scale);
+                        // null once iOS Safari's canvas memory is exhausted; the TypeError falls back below
                         const ctx = canvas.getContext('2d');
                         // JPEG has no transparency: paint white so transparent areas don't turn black
                         ctx.fillStyle = '#fff';
                         ctx.fillRect(0, 0, canvas.width, canvas.height);
                         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                         const dataUrl = canvas.toDataURL('image/jpeg', IMAGE_JPEG_QUALITY);
-                        // Free the canvas memory straight away (iOS Safari limits total canvas memory)
-                        canvas.width = 0;
-                        canvas.height = 0;
                         // A canvas that couldn't be encoded returns "data:,"
                         if (dataUrl.startsWith('data:image/jpeg')) {
                             return dataUrl;
                         }
                     } catch (error) {
                         console.warn('Sending image without resizing:', error);
+                    } finally {
+                        // Free the canvas memory straight away, on every path (iOS Safari
+                        // limits total canvas memory, and the rest of the batch needs it)
+                        if (canvas) {
+                            canvas.width = 0;
+                            canvas.height = 0;
+                        }
                     }
                     return this.readAsDataUrl(file);
                 },
@@ -830,6 +837,14 @@
                                 if (this.images.length >= this.maxImages) {
                                     this.errorMessage = `You can add up to ${this.maxImages} images.`;
                                     return;
+                                }
+                                // Mirrors the server's combined-size limit, so an image that can't
+                                // be shrunk (e.g. HEIC on Android) is refused here, by name
+                                const totalSize = this.images.reduce((sum, image) => sum + image.dataUrl.length, 0);
+                                if (totalSize + dataUrl.length > this.maxImagesTotalMb * 1024 * 1024) {
+                                    this.errorMessage = `${file.name || 'That image'} is too large to add: ` +
+                                        `images can be up to ${this.maxImagesTotalMb} MB in total.`;
+                                    continue;
                                 }
                                 this.images.push({ id: ++this.nextImageId, dataUrl });
                                 this.inputText = ''; // Clear text if image is added

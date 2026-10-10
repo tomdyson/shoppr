@@ -155,7 +155,7 @@ Content-Type: application/json
 }
 ```
 
-All images are read in a single vision request and combined into one list. A single `"image": "data:..."` field is still accepted from older clients.
+All images are read in a single vision request and combined into one list. Together they can be up to 18 MB of data-URL text, which keeps the request under Gemini's 20 MB limit. A single `"image": "data:..."` field is still accepted from older clients.
 
 ### Get Shopping List
 
