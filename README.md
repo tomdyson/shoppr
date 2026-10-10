@@ -108,9 +108,11 @@ Open http://localhost:8000 in your browser.
 1. **Select a supermarket** (optional) — Choose your store for optimized ordering
 2. **Add items** via one of these methods:
    - **Type or paste** a list in the text area
-   - **Upload an image** of a handwritten or printed list
+   - **Upload images** of a handwritten or printed list
    - **Take a photo** (on mobile) using the camera button
    - **Paste a screenshot** using Ctrl+V or the Paste button
+
+   You can add up to 5 images (e.g. several screenshots of a long list, or one photo per page); they're read together and combined into a single list. Images over 1 MB are shrunk on your device (to 2048px on the long edge, as JPEG) before upload, keeping the request well inside the vision model's 20 MB limit; anything the browser can't decode, such as HEIC on Android, is sent as-is.
 3. **Click "Create shopping list"** — The AI processes your input and creates an organized list
 
 ### Using Your List
@@ -148,10 +150,12 @@ POST /api/process-image
 Content-Type: application/json
 
 {
-  "image": "data:image/png;base64,...",  // Base64 encoded image
+  "images": ["data:image/png;base64,...", "data:image/jpeg;base64,..."],  // 1–5 base64 encoded images
   "supermarket": "sainsburys"  // optional
 }
 ```
+
+All images are read in a single vision request and combined into one list. Together they can be up to 18 MB of data-URL text, which keeps the request under Gemini's 20 MB limit. A single `"image": "data:..."` field is still accepted from older clients.
 
 ### Get Shopping List
 

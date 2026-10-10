@@ -54,6 +54,18 @@ OPENROUTER_MODEL_PREFIX = os.getenv("OPENROUTER_MODEL_PREFIX", "")
 MODEL_NAME = os.getenv("LLM_MODEL", "google/gemini-2.5-flash-lite")
 VISION_MODEL_NAME = os.getenv("LLM_VISION_MODEL", "google/gemini-2.5-flash")
 
+# Images per list, kept in step with MAX_IMAGES in index.html
+MAX_IMAGES = 5
+
+# Combined size of a list's images as sent (data URL characters), kept in step with
+# maxImagesTotalMb in index.html. Gemini caps a whole request at 20 MB including inline
+# image data, so this stays under it whether the base64 text or decoded bytes are counted.
+MAX_IMAGES_TOTAL_MB = 18
+
+# Image types Gemini accepts (ai.google.dev/gemini-api/docs/image-understanding,
+# updated 23 Sep 2026). Anything else is sent labelled image/png, as it always was.
+VISION_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}
+
 # Validate configuration
 if not OPENROUTER_API_KEY:
     raise ValueError("OPENROUTER_API_KEY environment variable is required")
@@ -108,7 +120,8 @@ class ProcessTextRequest(BaseModel):
 
 
 class ProcessImageRequest(BaseModel):
-    image: str  # Base64-encoded image
+    images: List[str] = []  # Base64-encoded images (data URLs)
+    image: Optional[str] = None  # Single image, accepted from older clients
     supermarket: Optional[str] = None
 
 
@@ -270,34 +283,45 @@ IMPORTANT: Respond ONLY with the JSON array, no additional text."""
     return json.loads(cleaned_response), usage_stats
 
 
-def ocr_image_with_llm(image_base64: str) -> Tuple[str, Dict[str, Any]]:
-    """Extract text from image using vision-capable LLM."""
-    # Handle data URL format (e.g., "data:image/png;base64,...")
-    if ',' in image_base64:
-        image_base64 = image_base64.split(',')[1]
+def ocr_images_with_llm(images_base64: List[str]) -> Tuple[str, Dict[str, Any]]:
+    """Extract text from one or more images in a single vision-capable LLM call."""
+    if len(images_base64) == 1:
+        prompt_text = (
+            "Extract all text from this shopping list image. "
+            "Return only the items, one per line. "
+            "Include quantities if visible. "
+            "Do not add any commentary or formatting."
+        )
+    else:
+        prompt_text = (
+            f"Extract all text from these {len(images_base64)} shopping list images "
+            "and combine them into a single list. "
+            "If the images overlap (for example, consecutive screenshots of the same list), "
+            "include each item only once. "
+            "Return only the items, one per line. "
+            "Include quantities if visible. "
+            "Do not add any commentary or formatting."
+        )
 
-    prompt_text = (
-        "Extract all text from this shopping list image. "
-        "Return only the items, one per line. "
-        "Include quantities if visible. "
-        "Do not add any commentary or formatting."
-    )
+    content: List[Dict[str, Any]] = [{"type": "text", "text": prompt_text}]
+    for image_base64 in images_base64:
+        media_type = "image/png"
+        # Handle data URL format (e.g., "data:image/jpeg;base64,..."), keeping its
+        # declared type when the vision model accepts it
+        if ',' in image_base64:
+            header, image_base64 = image_base64.split(',', 1)
+            declared_type = header.removeprefix("data:").split(';')[0].lower()
+            if declared_type in VISION_IMAGE_TYPES:
+                media_type = declared_type
+        content.append({
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:{media_type};base64,{image_base64}"
+            }
+        })
 
     # Build messages with vision content
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt_text},
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/png;base64,{image_base64}"
-                    }
-                }
-            ]
-        }
-    ]
+    messages = [{"role": "user", "content": content}]
 
     # Make request via OpenRouter API
     raw_response, usage_stats = openrouter_client.chat_completion(
@@ -512,9 +536,22 @@ async def process_image(request: ProcessImageRequest):
         if request.supermarket and request.supermarket not in SUPERMARKETS:
             raise HTTPException(status_code=400, detail="Invalid supermarket")
 
-        # OCR the image
-        print("Starting OCR...")
-        extracted_text, ocr_usage = ocr_image_with_llm(request.image)
+        images = [image for image in request.images if image]
+        if request.image:
+            images.insert(0, request.image)
+        if not images:
+            raise HTTPException(status_code=400, detail="No image provided")
+        if len(images) > MAX_IMAGES:
+            raise HTTPException(status_code=400, detail=f"Too many images (maximum {MAX_IMAGES})")
+        if sum(len(image) for image in images) > MAX_IMAGES_TOTAL_MB * 1024 * 1024:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Images are too large to send together (maximum {MAX_IMAGES_TOTAL_MB} MB in total)"
+            )
+
+        # OCR the images
+        print(f"Starting OCR of {len(images)} image(s)...")
+        extracted_text, ocr_usage = ocr_images_with_llm(images)
         print(f"OCR result: {extracted_text}")
 
         if not extracted_text.strip():

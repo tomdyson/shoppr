@@ -59,7 +59,7 @@ A mobile-first shopping list app using FastAPI + Vue.js + OpenRouter API for AI-
 - Cost tracking via OpenRouter response usage object (see `openrouter_client.py`)
 - Three LLM call sites in `main.py`:
   - `process_items_with_llm()` - Text categorization
-  - `ocr_image_with_llm()` - Image OCR (vision API)
+  - `ocr_images_with_llm()` - Image OCR (vision API; one request for all of a list's images, capped by `MAX_IMAGES` and `MAX_IMAGES_TOTAL_MB`, both mirrored in `index.html`)
   - `process_edit_with_llm()` - Natural language list editing
 
 ### Frontend
