@@ -112,7 +112,7 @@ Open http://localhost:8000 in your browser.
    - **Take a photo** (on mobile) using the camera button
    - **Paste a screenshot** using Ctrl+V or the Paste button
 
-   You can add up to 5 images (e.g. several screenshots of a long list, or one photo per page); they're read together and combined into a single list.
+   You can add up to 5 images (e.g. several screenshots of a long list, or one photo per page); they're read together and combined into a single list. Images over 1 MB are shrunk on your device (to 2048px on the long edge, as JPEG) before upload, keeping the request well inside the vision model's 20 MB limit; anything the browser can't decode, such as HEIC on Android, is sent as-is.
 3. **Click "Create shopping list"** — The AI processes your input and creates an organized list
 
 ### Using Your List

@@ -228,7 +228,7 @@
                 <!-- Submit button -->
                 <input id="submit"
                     class="hover:opacity-75 mt-3 cursor-pointer bg-cyan-100 px-2 py-1 rounded text-lg mb-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                    type="submit" :value="isLoading ? loadingMessage : 'Create shopping list'"
+                    type="submit" :value="isLoading ? loadingMessage : (pendingImageReads ? 'Preparing images...' : 'Create shopping list')"
                     :disabled="isLoading || pendingImageReads > 0 || (!inputText.trim() && !images.length)" />
 
                 <!-- Error message -->
@@ -412,6 +412,12 @@
     </div>
 
     <script>
+        // Images over 1 MB are shrunk to a JPEG before upload: Gemini limits inline
+        // image data to 20 MB per request, which a few full-size phone photos can pass.
+        const IMAGE_SHRINK_ABOVE_BYTES = 1024 * 1024;
+        const IMAGE_MAX_DIMENSION = 2048;
+        const IMAGE_JPEG_QUALITY = 0.85;
+
         new Vue({
             el: '#app',
             data: {
@@ -761,6 +767,53 @@
                     });
                 },
 
+                loadImage(file) {
+                    return new Promise((resolve, reject) => {
+                        const url = URL.createObjectURL(file);
+                        const img = new Image();
+                        img.onload = () => {
+                            URL.revokeObjectURL(url);
+                            resolve(img);
+                        };
+                        img.onerror = () => {
+                            URL.revokeObjectURL(url);
+                            reject(new Error('Browser could not decode the image'));
+                        };
+                        img.src = url;
+                    });
+                },
+
+                async prepareImage(file) {
+                    if (file.size <= IMAGE_SHRINK_ABOVE_BYTES) {
+                        return this.readAsDataUrl(file);
+                    }
+                    // Anything that can't be shrunk (e.g. HEIC, which Android browsers
+                    // can't decode) is sent as-is, as before.
+                    try {
+                        const img = await this.loadImage(file);
+                        const scale = Math.min(1, IMAGE_MAX_DIMENSION / Math.max(img.naturalWidth, img.naturalHeight));
+                        const canvas = document.createElement('canvas');
+                        canvas.width = Math.round(img.naturalWidth * scale);
+                        canvas.height = Math.round(img.naturalHeight * scale);
+                        const ctx = canvas.getContext('2d');
+                        // JPEG has no transparency: paint white so transparent areas don't turn black
+                        ctx.fillStyle = '#fff';
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                        const dataUrl = canvas.toDataURL('image/jpeg', IMAGE_JPEG_QUALITY);
+                        // Free the canvas memory straight away (iOS Safari limits total canvas memory)
+                        canvas.width = 0;
+                        canvas.height = 0;
+                        // A canvas that couldn't be encoded returns "data:,"
+                        if (dataUrl.startsWith('data:image/jpeg')) {
+                            return dataUrl;
+                        }
+                    } catch (error) {
+                        console.warn('Sending image without resizing:', error);
+                    }
+                    return this.readAsDataUrl(file);
+                },
+
                 async addImageFiles(files) {
                     // Submit stays disabled until every file in the batch is read,
                     // so a quick tap can't send only part of the selection
@@ -772,7 +825,7 @@
                                 return;
                             }
                             try {
-                                const dataUrl = await this.readAsDataUrl(file);
+                                const dataUrl = await this.prepareImage(file);
                                 // Re-check: another add may have filled the list while this file was read
                                 if (this.images.length >= this.maxImages) {
                                     this.errorMessage = `You can add up to ${this.maxImages} images.`;
